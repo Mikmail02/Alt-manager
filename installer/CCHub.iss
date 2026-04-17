@@ -4,7 +4,7 @@
 
 #define AppName "Case Clicker Hub"
 #define AppShort "CCHub"
-#define AppVersion "1.0.3"
+#define AppVersion "1.0.4"
 #define AppPublisher "Mikmail"
 #define AppURL "https://github.com/Mikmail02/Alt-manager"
 #define AppExeName "CCHub.exe"
