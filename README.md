@@ -1,189 +1,118 @@
-# Alt Manager - Setup Guide
+# Case Clicker Hub
 
-This guide explains exactly how to run this Alt Manager on a new PC from scratch.
+Desktop-app for å håndtere flere case-clicker.com-brukere fra én lokal kontroll­panel.
 
-## What This Project Includes
+- Installeres som vanlig Windows-app med Start-meny-snarvei og ren avinstallering
+- Kjører lokalt på `https://127.0.0.1:5000` — ingen ngrok, ingen public tunnel
+- Tvunget auto-oppdatering via GitHub Releases
 
-- `app.py` - local Flask server + web panel (`http://localhost:5000`)
-- `altacc.js` - Tampermonkey worker script for alt accounts
-- `mainacc.js` - Tampermonkey worker script for main account
-- `cases.json` - case/capsule list used by Convert/Booster
-- `accounts.json` / `settings.json` - local runtime data (auto-created/updated)
+---
 
-## 1) Install Required Software
+## For sluttbrukere (installasjon)
 
-Install these first:
+### 1. Last ned installeren
 
-1. **Python 3.11+**
-   - Download: `https://www.python.org/downloads/`
-   - On Windows, enable **"Add Python to PATH"** during install
+Hent siste `CCHub-Setup-x.y.z.exe` fra [Releases](https://github.com/Mikmail02/Alt-manager/releases/latest).
 
-2. **Google Chrome**
-   - Download: `https://www.google.com/chrome/`
+### 2. Kjør installeren
 
-3. **Tampermonkey (Chrome extension)**
-   - Chrome Web Store: `https://www.tampermonkey.net/`
+Windows SmartScreen vil advare første gang (appen er ikke signert). Klikk **"Mer info" → "Kjør likevel"**. Installeren krever ikke admin.
 
-4. **ngrok**
-   - Download: `https://ngrok.com/download`
-   - Sign up: `https://dashboard.ngrok.com/signup`
+### 3. Første oppstart
 
-## 2) Prepare the Project Folder
+Appen starter i systemstatusfeltet (tray). Ved første kjøring:
 
-Put all project files in one folder, for example:
+- Genererer et lokalt rot-sertifikat og installerer det i Windows-trust-store
+- Genererer en personlig API-token for workerne
+- Åpner panelet automatisk på `https://127.0.0.1:5000`
 
-`C:\Users\<you>\Documents\Alt manager`
+### 4. Installer Tampermonkey + workere
 
-On macOS, for example:
+- Installer [Tampermonkey](https://www.tampermonkey.net/) i Chrome
+- Opprett to nye Tampermonkey-skript:
+  - Lim inn innholdet fra [`mainacc.js`](mainacc.js) i ett — dette er for main-brukeren
+  - Lim inn innholdet fra [`altacc.js`](altacc.js) i ett — dette er for alle alts
 
-`/Users/<you>/Documents/Alt manager`
+### 5. Koble workerne til appen
 
-You should have at least:
+1. Høyreklikk tray-ikonet → **"Kopier worker-link"**
+2. Gå til en case-clicker.com-fane
+3. Lim inn i URL-feltet i worker-boksen nederst til høyre, trykk **CONNECT**
 
-- `app.py`
-- `altacc.js`
-- `mainacc.js`
-- `cases.json`
+Dette lagrer URL + token én gang — aldri behov for å gjøre det igjen.
 
-## 3) Install Python Dependencies
+### 6. Auto-oppdateringer
 
-Open a terminal in the project folder and run:
+Neste gang en ny versjon slippes, blokkerer appen all bruk til oppdatering er installert. Ett klikk på **"Oppdater nå"** laster ned og installerer uten videre input.
 
-```bash
-pip install flask flask-cors
+---
+
+## For utviklere
+
+### Oppsett
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-If `pip` is not recognized:
+### Kjør lokalt
 
-```bash
-python -m pip install flask flask-cors
+```powershell
+python main.py
 ```
 
-## 4) Configure ngrok
+Første kjøring genererer `%APPDATA%\CCHub\` med cert, config og datafiler.
 
-In terminal:
+### Prosjektstruktur
 
-1. Add your auth token (from ngrok dashboard):
-
-```bash
-ngrok config add-authtoken <YOUR_NGROK_TOKEN>
+```
+cchub/              Python-pakken (app-logikk)
+  auth.py           Token-middleware for Flask
+  cert_manager.py   Generer + installer lokal CA + server-cert
+  config.py         Per-install config (token, preferanser)
+  paths.py          AppData + resource path helpers
+  tray.py           pystray tray-icon + update-gate
+  updater.py        GitHub Releases auto-update
+  version.py        __version__ + metadata
+app.py              Flask-backend (route-handlere + HTML-panel)
+main.py             Entry point for PyInstaller
+altacc.js           Tampermonkey-skript for alt-brukere
+mainacc.js          Tampermonkey-skript for main-brukeren
+cases.json          Read-only case/capsule-liste
+assets/icon.ico     App-ikon (genereres av tools/make_icon.py)
+build.spec          PyInstaller-spec
+installer/          Inno Setup-script
+tools/              Hjelpeskript (icon-gen, build-release)
 ```
 
-2. (Later) start tunnel to local panel:
+### Bygg én .exe + installer lokalt
 
-```bash
-ngrok http 5000
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build_release.ps1
 ```
 
-Keep this terminal open while using the manager.
+Krever [Inno Setup 6](https://jrsoftware.org/isinfo.php) installert. Output havner i `installer\Output\CCHub-Setup-x.y.z.exe`.
 
-## 5) Start Alt Manager Backend
+### Slipp ny versjon
 
-In a second terminal window, run:
+1. Bump `__version__` i `cchub/version.py` og `AppVersion` i `installer/CCHub.iss`
+2. Commit + push
+3. Tag: `git tag v1.0.1 && git push origin v1.0.1`
+4. GitHub Actions bygger og publiserer installeren til Releases automatisk
+5. Eksisterende brukere får tvungen oppdatering ved neste oppstart
 
-```bash
-python app.py
+### Feilsøking
+
+**Cert-advarsel i browser**
+Kjør appen én gang — rot-CA installeres automatisk. Hvis ikke, kjør manuelt:
+```powershell
+certutil -user -addstore Root "%APPDATA%\CCHub\cert\ca.cert.pem"
 ```
 
-Expected: Flask starts on `0.0.0.0:5000`.
+**Worker rapporterer 401**
+Token mangler eller feil. Høyreklikk tray → **Kopier worker-link** → lim inn på nytt og trykk CONNECT.
 
-Keep this terminal open while using the manager.
-
-## 6) Open the Local Panel
-
-Open in browser:
-
-`http://localhost:5000`
-
-Panel should load with sidebar and tabs.
-
-## 7) Install Tampermonkey Scripts
-
-In Tampermonkey:
-
-1. Create script for **alts**, paste `altacc.js`, save.
-2. Create script for **main**, paste `mainacc.js`, save.
-
-Both scripts are set to:
-
-- `@match *://*.case-clicker.com/*`
-
-So they run automatically on case-clicker pages.
-
-## 8) Connect Workers to Your ngrok URL
-
-1. Start `ngrok http 5000`.
-2. Copy the public `https://...ngrok...` URL.
-3. Open each case-clicker tab where a worker runs.
-4. In the worker box (bottom-right), paste URL and click **CONNECT**.
-5. Optionally click **TEST LINK** first.
-
-Expected state: `CONNECTED`.
-
-## 9) Main Account Setup (Important)
-
-In the local panel:
-
-1. Let accounts appear via heartbeat.
-2. Copy your **main account ID** from selected account.
-3. Paste in Settings/Main ID field and save.
-
-This is required for transfer automation (`join_and_confirm` flow).
-
-## 10) Recommended Run Order
-
-1. Start backend: `python app.py`
-2. Start tunnel: `ngrok http 5000`
-3. Open panel: `http://localhost:5000`
-4. Open case-clicker tabs (main + alts)
-5. Ensure workers show `CONNECTED`
-6. Verify accounts appear in panel
-7. Run features (Inventory/Transfer/Convert/Booster)
-
-## 11) Quick Troubleshooting
-
-### `Heartbeat failed (502)`
-
-- Flask backend is not running or crashed
-- Restart `python app.py`
-- Confirm ngrok points to port `5000`
-
-### Worker says disconnected
-
-- Re-paste ngrok URL and press **CONNECT**
-- Check that ngrok terminal is still running
-- Use **TEST LINK**
-
-### Accounts flicker offline/online
-
-- Make sure backend and ngrok are stable
-- Keep one tab per worker account active/loaded
-
-### Convert buy fails with status 400
-
-- Usually API-side validation/rate issues
-- Retry after a few seconds
-- Ensure selected case/capsule exists in `cases.json`
-
-## macOS Differences Only
-
-These are the only practical differences from the steps above:
-
-- Use `python3`/`pip3` if `python`/`pip` are not available:
-  - `python3 -m pip install flask flask-cors`
-  - `python3 app.py`
-- If ngrok is not in PATH after install, run it via full path or install with Homebrew:
-  - `brew install ngrok/ngrok/ngrok`
-- Project path format uses `/Users/...` instead of `C:\Users\...`
-
-### No profile image
-
-- Some external image hosts can block/hotlink intermittently
-- UI uses fallback avatar automatically
-
-## 12) Notes
-
-- This project is designed around Chrome + Tampermonkey and works on Windows/macOS with the same workflow.
-- `accounts.json` and `settings.json` are runtime files and will change often.
-- Do not close terminals running Flask/ngrok while the system is active.
-```
+**Panel åpner ikke**
+Sjekk `%APPDATA%\CCHub\logs\tray.log`. Port 5000 kan være okkupert — stopp andre prosesser på den porten.

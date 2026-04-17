@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Main Worker v1.0
-// @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Main Node - Auto Accept & Confirm Trades
+// @name         CC Hub Main Worker
+// @namespace    https://github.com/Mikmail02/Alt-manager
+// @version      5.0.0
+// @description  Main worker for Case Clicker Hub desktop app
 // @author       Mikmail
 // @match        *://*.case-clicker.com/*
 // @run-at       document-start
@@ -11,6 +11,8 @@
 // @grant        GM_getValue
 // @grant        GM_setClipboard
 // @grant        unsafeWindow
+// @connect      127.0.0.1
+// @connect      localhost
 // ==/UserScript==
 
 (function() {
@@ -118,7 +120,7 @@
             </div>
             <div style="padding:12px;">
                 <div style="display:flex; gap:8px; margin-bottom:8px;">
-                    <input id="ngrok_url" placeholder="https://your-tunnel-url (ngrok, Cloudflare, etc.)" style="flex:1; padding:8px; background:#1a1a1a; border:1px solid #444; color:#fff; border-radius:6px; box-sizing:border-box;">
+                    <input id="ngrok_url" placeholder="Lim inn fra CC Hub tray > Kopier worker-link" style="flex:1; padding:8px; background:#1a1a1a; border:1px solid #444; color:#fff; border-radius:6px; box-sizing:border-box;">
                     <button id="btn_link" style="min-width:130px; background:#f59e0b; border:none; padding:8px; color:#111; cursor:pointer; font-weight:700; border-radius:6px;">CONNECT MAIN</button>
                 </div>
                 <div style="display:flex; gap:8px; margin-bottom:8px;">
@@ -169,7 +171,7 @@
         });
         window.addEventListener('mouseup', () => { isDragging = false; dragHandle.style.cursor = 'move'; });
 
-        const savedUrl = GM_getValue('ngrok_url', '');
+        const savedUrl = GM_getValue('ngrok_url', DEFAULT_BACKEND_URL);
         document.getElementById('ngrok_url').value = savedUrl;
         const clickCb = document.getElementById('opt_click');
         const vaultCb = document.getElementById('opt_vault');
@@ -298,13 +300,34 @@
         }
     }
 
+    const DEFAULT_BACKEND_URL = 'https://127.0.0.1:5000';
+    const TOKEN_KEY = 'cchub_token';
+
     function normalizeBaseUrl(url) {
         let v = (url || '').trim();
+        if (!v) return '';
+        const hashIdx = v.indexOf('#');
+        if (hashIdx !== -1) {
+            const token = v.slice(hashIdx + 1).trim();
+            if (token) GM_setValue(TOKEN_KEY, token);
+            v = v.slice(0, hashIdx).trim();
+        }
         if (!v) return '';
         if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
         v = v.replace(/\/+$/, '');
         v = v.replace(/\/api(?:\/.*)?$/i, '');
         return v;
+    }
+
+    function cchubToken() {
+        return GM_getValue(TOKEN_KEY, '');
+    }
+
+    function gmRequest(opts) {
+        const token = cchubToken();
+        const headers = Object.assign({}, opts.headers || {});
+        if (token) headers['X-Alt-Token'] = token;
+        return GM_xmlhttpRequest(Object.assign({}, opts, { headers }));
     }
 
     function setConnState(ok) {
@@ -338,7 +361,7 @@
             log('No URL set.');
             return;
         }
-        GM_xmlhttpRequest({
+        gmRequest({
             method: "GET",
             url: `${baseUrl}/api/settings`,
             onload: (res) => {
@@ -465,7 +488,7 @@
 
     function reportRemote(baseUrl, id, msg) {
         log("LOGG: " + msg);
-        GM_xmlhttpRequest({
+        gmRequest({
             method: "POST", url: `${baseUrl}/api/log_status`,
             headers: { "Content-Type": "application/json" },
             data: JSON.stringify({ id: id, msg: msg })
@@ -697,7 +720,7 @@
 
             if(url && me) {
                 const userId = me.id || me.sub;
-                GM_xmlhttpRequest({
+                gmRequest({
                     method: "POST", url: `${url}/api/update_inventory`,
                     headers: { "Content-Type": "application/json" },
                     data: JSON.stringify({ id: userId, items: inventoryCache })
@@ -746,7 +769,7 @@
                 totalAmount += amount;
                 totalValue += (priceMap[it._id] || 0) * amount;
             });
-            GM_xmlhttpRequest({
+            gmRequest({
                 method: "POST",
                 url: `${baseUrl}/api/case_summary`,
                 headers: { "Content-Type": "application/json" },
@@ -836,7 +859,7 @@
                 }
             };
 
-            GM_xmlhttpRequest({
+            gmRequest({
                 method: "POST", url: `${baseUrl}/api/heartbeat`,
                 headers: { "Content-Type": "application/json" },
                 data: JSON.stringify(payload),

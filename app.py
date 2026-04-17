@@ -6,16 +6,37 @@ import tempfile
 import threading
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
-from flask_cors import CORS
+
+from cchub import auth, config as app_config, paths
+from cchub.version import __version__
 
 PORT = 5000
-DATA_FILE = 'accounts.json'
-SETTINGS_FILE = 'settings.json'
-CASES_FILE = 'cases.json'
+HOST = "127.0.0.1"
+
+paths.ensure_dirs()
+paths.migrate_legacy_data(paths.RESOURCE_DIR)
+
+DATA_FILE = str(paths.ACCOUNTS_FILE)
+SETTINGS_FILE = str(paths.SETTINGS_FILE)
+CASES_FILE = str(paths.CASES_FILE)
 
 app = Flask(__name__)
-CORS(app)
+auth.install(app)
 DB_LOCK = threading.RLock()
+
+
+@app.route("/api/ping")
+def api_ping():
+    return jsonify({"ok": True, "version": __version__})
+
+
+@app.route("/config")
+def panel_config():
+    return jsonify({
+        "token": app_config.token(),
+        "version": __version__,
+        "base_url": f"https://{HOST}:{PORT}",
+    })
 
 def load_db():
     if not os.path.exists(DATA_FILE):
@@ -74,7 +95,9 @@ def parse_timestamp(value):
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_UI)
+    return render_template_string(
+        HTML_UI.replace("__CCHUB_TOKEN__", app_config.token()).replace("__CCHUB_VERSION__", __version__)
+    )
 
 @app.route('/api/heartbeat', methods=['POST'])
 def heartbeat():
@@ -656,7 +679,24 @@ HTML_UI = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Alt Manager v5.2</title>
+    <title>Case Clicker Hub __CCHUB_VERSION__</title>
+    <script>
+      window.__CC_TOKEN__ = "__CCHUB_TOKEN__";
+      window.__CC_VERSION__ = "__CCHUB_VERSION__";
+      (function() {
+        const origFetch = window.fetch.bind(window);
+        window.fetch = function(input, init) {
+          init = init || {};
+          const headers = new Headers(init.headers || {});
+          let url = typeof input === "string" ? input : (input && input.url) || "";
+          if (url.startsWith("/api/")) {
+            headers.set("X-Alt-Token", window.__CC_TOKEN__);
+          }
+          init.headers = headers;
+          return origFetch(input, init);
+        };
+      })();
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -2254,6 +2294,20 @@ HTML_UI = """
 </html>
 """
 
+def run_server(host: str = HOST, port: int = PORT) -> None:
+    from cchub import cert_manager
+
+    cert_path, key_path = cert_manager.ensure_certs()
+    cert_manager.install_ca_to_windows_store()
+    print(f"--- Case Clicker Hub {__version__} listening on https://{host}:{port} ---")
+    app.run(
+        host=host,
+        port=port,
+        ssl_context=(str(cert_path), str(key_path)),
+        threaded=True,
+        use_reloader=False,
+    )
+
+
 if __name__ == '__main__':
-    print("--- ALT MANAGER SERVER v5.0 STARTED ---")
-    app.run(host='0.0.0.0', port=PORT)
+    run_server()
