@@ -13,6 +13,9 @@
 // @grant        unsafeWindow
 // @connect      127.0.0.1
 // @connect      localhost
+// @updateURL    https://raw.githubusercontent.com/Mikmail02/Alt-manager/main/altacc.js
+// @downloadURL  https://raw.githubusercontent.com/Mikmail02/Alt-manager/main/altacc.js
+// @supportURL   https://github.com/Mikmail02/Alt-manager/issues
 // ==/UserScript==
 
 (function() {

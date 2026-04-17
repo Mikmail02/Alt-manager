@@ -16,6 +16,7 @@ datas = [
 hiddenimports = []
 hiddenimports += collect_submodules("cryptography")
 hiddenimports += collect_submodules("pystray")
+hiddenimports += collect_submodules("webview")
 
 block_cipher = None
 

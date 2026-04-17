@@ -697,6 +697,41 @@ HTML_UI = """
         };
       })();
     </script>
+    <style>
+      html, body { height: 100% !important; margin: 0 !important; }
+      body { flex-direction: column !important; }
+      .cc-titlebar {
+        display: flex; align-items: stretch; height: 32px;
+        background: #000; border-bottom: 1px solid #27272a;
+        color: #a1a1aa; font-family: 'Inter', sans-serif;
+        font-size: 12px; font-weight: 600; user-select: none;
+        -webkit-app-region: drag; flex: 0 0 auto; z-index: 10000;
+      }
+      .cc-titlebar-title {
+        display: flex; align-items: center; padding: 0 14px; letter-spacing: 0.2px;
+      }
+      .cc-titlebar-title b { color: #10b981; margin-right: 6px; }
+      .cc-titlebar-spacer { flex: 1 1 auto; }
+      .cc-titlebar-buttons {
+        display: flex; -webkit-app-region: no-drag;
+      }
+      .cc-titlebar-btn {
+        width: 46px; height: 32px; border: 0; background: transparent;
+        color: #a1a1aa; font-family: 'Segoe UI Symbol', 'Segoe MDL2 Assets', sans-serif;
+        font-size: 13px; cursor: pointer; display: flex;
+        align-items: center; justify-content: center; transition: background .12s, color .12s;
+      }
+      .cc-titlebar-btn:hover { background: #1f1f22; color: #fff; }
+      .cc-titlebar-btn.cc-close:hover { background: #e81123; color: #fff; }
+      .cc-app-body {
+        flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden;
+      }
+    </style>
+    <script>
+      function cchubMinimize() { window.pywebview && window.pywebview.api.minimize(); }
+      function cchubToggleMax() { window.pywebview && window.pywebview.api.toggle_maximize(); }
+      function cchubClose() { window.pywebview && window.pywebview.api.hide_to_tray(); }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -1023,6 +1058,17 @@ HTML_UI = """
     </style>
 </head>
 <body>
+
+<div class="cc-titlebar">
+  <div class="cc-titlebar-title"><b>CC</b> Case Clicker Hub</div>
+  <div class="cc-titlebar-spacer"></div>
+  <div class="cc-titlebar-buttons">
+    <button class="cc-titlebar-btn" title="Minimer" onclick="cchubMinimize()">&#xE921;</button>
+    <button class="cc-titlebar-btn" title="Maksimer" onclick="cchubToggleMax()">&#xE922;</button>
+    <button class="cc-titlebar-btn cc-close" title="Lukk til tray" onclick="cchubClose()">&#xE8BB;</button>
+  </div>
+</div>
+<div class="cc-app-body">
 
 <div id="nprogress"><div class="bar"><div class="peg"></div></div></div>
 
@@ -2290,6 +2336,7 @@ HTML_UI = """
 
     init();
 </script>
+</div>
 </body>
 </html>
 """
