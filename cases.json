@@ -1,0 +1,753 @@
+[
+    {
+        "_id": "637f8f98ba2b763b85db1227",
+        "name": "CS:GO Weapon Case",
+        "price": 128.7,
+        "type": "case"
+    },
+    {
+        "_id": "63a35c7ff235c457e28265ce",
+        "name": "eSports 2013 Case",
+        "price": 94.7,
+        "type": "case"
+    },
+    {
+        "_id": "637542e91687bf4cebd95e5b",
+        "name": "Operation Bravo Case",
+        "price": 65,
+        "type": "case"
+    },
+    {
+        "_id": "63a5dd0eeb39fbb4dfdf9005",
+        "name": "Operation Hydra Case",
+        "price": 49.5,
+        "type": "case"
+    },
+    {
+        "_id": "63a5d67deb39fbb4dfdf8ffb",
+        "name": "eSports 2014 Summer Case",
+        "price": 25.8,
+        "type": "case"
+    },
+    {
+        "_id": "63a5d45beb39fbb4dfdf8ff9",
+        "name": "eSports 2013 Winter Case",
+        "price": 23.6,
+        "type": "case"
+    },
+    {
+        "_id": "63a5d82feb39fbb4dfdf8ffd",
+        "name": "Glove Case",
+        "price": 19.5,
+        "type": "case"
+    },
+    {
+        "_id": "637f91f3ba2b763b85db1266",
+        "name": "CS:GO Weapon Case 2",
+        "price": 18.8,
+        "type": "case"
+    },
+    {
+        "_id": "635c11428f2e0b1e1a4dd077",
+        "name": "Operation Riptide Case",
+        "price": 18.9,
+        "type": "case"
+    },
+    {
+        "_id": "63a5da99eb39fbb4dfdf9001",
+        "name": "Huntsman Weapon Case",
+        "price": 17.2,
+        "type": "case"
+    },
+    {
+        "_id": "637f9444ba2b763b85db1298",
+        "name": "CS:GO Weapon Case 3",
+        "price": 14.3,
+        "type": "case"
+    },
+    {
+        "_id": "636113ccb58b01f6e36a6047",
+        "name": "Operation Broken Fang Case",
+        "price": 14.2,
+        "type": "case"
+    },
+    {
+        "_id": "63a5dbc9eb39fbb4dfdf9003",
+        "name": "Operation Breakout Weapon Case",
+        "price": 13.8,
+        "type": "case"
+    },
+    {
+        "_id": "644ec3bac5cb63198345cae6",
+        "name": "Winter Offensive Weapon Case",
+        "price": 11.8,
+        "type": "case"
+    },
+    {
+        "_id": "637d03b3a1b5a0576749198d",
+        "name": "Shattered Web Case",
+        "price": 10.7,
+        "type": "case"
+    },
+    {
+        "_id": "637d0946a1b5a05767491993",
+        "name": "Chroma Case",
+        "price": 9.3,
+        "type": "case"
+    },
+    {
+        "_id": "635346787db930593e69cd6d",
+        "name": "Operation Phoenix Weapon Case",
+        "price": 8.4,
+        "type": "case"
+    },
+    {
+        "_id": "63a5df80eb39fbb4dfdf9007",
+        "name": "Operation Vanguard Weapon Case",
+        "price": 8.3,
+        "type": "case"
+    },
+    {
+        "_id": "644ec087c5cb63198345cadd",
+        "name": "Spectrum Case",
+        "price": 8.1,
+        "type": "case"
+    },
+    {
+        "_id": "644ebc22c5cb63198345ca87",
+        "name": "Revolver Case",
+        "price": 7.8,
+        "type": "case"
+    },
+    {
+        "_id": "637d0e3fa1b5a05767492400",
+        "name": "Chroma 3 Case",
+        "price": 7.7,
+        "type": "case"
+    },
+    {
+        "_id": "63a36140f235c457e2826612",
+        "name": "Gamma 2 Case",
+        "price": 7.6,
+        "type": "case"
+    },
+    {
+        "_id": "637d0c5ea1b5a057674923fe",
+        "name": "Chroma 2 Case",
+        "price": 7.6,
+        "type": "case"
+    },
+    {
+        "_id": "63a5e062eb39fbb4dfdf9009",
+        "name": "Operation Wildfire Case",
+        "price": 7.2,
+        "type": "case"
+    },
+    {
+        "_id": "63a35fa9f235c457e2826610",
+        "name": "Gamma Case",
+        "price": 7.2,
+        "type": "case"
+    },
+    {
+        "_id": "644ec1cec5cb63198345cadf",
+        "name": "Spectrum 2 Case",
+        "price": 7,
+        "type": "case"
+    },
+    {
+        "_id": "67056f1d2b333be2d8845d5a",
+        "name": "Gallery Case",
+        "price": 5.4,
+        "type": "case"
+    },
+    {
+        "_id": "63a5d9b2eb39fbb4dfdf8fff",
+        "name": "Horizon Case",
+        "price": 5.2,
+        "type": "case"
+    },
+    {
+        "_id": "644ebd65c5cb63198345cab3",
+        "name": "Shadow Case",
+        "price": 5.1,
+        "type": "case"
+    },
+    {
+        "_id": "637f95e3ba2b763b85db12b4",
+        "name": "Danger Zone Case",
+        "price": 4.9,
+        "type": "case"
+    },
+    {
+        "_id": "63a35e08f235c457e282660e",
+        "name": "Falchion Case",
+        "price": 4.7,
+        "type": "case"
+    },
+    {
+        "_id": "637d061ea1b5a05767491991",
+        "name": "Prisma Case",
+        "price": 4.6,
+        "type": "case"
+    },
+    {
+        "_id": "637d0222a1b5a0576749198b",
+        "name": "Prisma 2 Case",
+        "price": 4.6,
+        "type": "case"
+    },
+    {
+        "_id": "637d04bea1b5a0576749198f",
+        "name": "CS20 Case",
+        "price": 4.5,
+        "type": "case"
+    },
+    {
+        "_id": "67fa1c883c3c4784cd62bba3",
+        "name": "Fever Case",
+        "price": 4.4,
+        "type": "case"
+    },
+    {
+        "_id": "637f8cc7ba2b763b85db1204",
+        "name": "Clutch Case",
+        "price": 4.3,
+        "type": "case"
+    },
+    {
+        "_id": "63529100e4821cab2f1c5ed2",
+        "name": "Dreams And Nightmares Case",
+        "price": 3.8,
+        "type": "case"
+    },
+    {
+        "_id": "63611055b58b01f6e36a5d01",
+        "name": "Snakebite Case",
+        "price": 3.7,
+        "type": "case"
+    },
+    {
+        "_id": "63611c05b58b01f6e36a6de0",
+        "name": "Fracture Case",
+        "price": 3.5,
+        "type": "case"
+    },
+    {
+        "_id": "640c9ae8630b848c02320a64",
+        "name": "Revolution Case",
+        "price": 3.3,
+        "type": "case"
+    },
+    {
+        "_id": "661eb20e5ee63458cc6c1abb",
+        "name": "Kilowatt Case",
+        "price": 3.2,
+        "type": "case"
+    },
+    {
+        "_id": "635c2699877db3111241a1de",
+        "name": "Recoil Case",
+        "price": 3.2,
+        "type": "case"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2be",
+        "name": "EMS Katowice 2014 Challengers",
+        "price": 72221.6,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2c0",
+        "name": "EMS Katowice 2014 Legends",
+        "price": 48556.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2cc",
+        "name": "ESL One Katowice 2015 Challengers (Holo-Foil)",
+        "price": 1231.5,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2c8",
+        "name": "DreamHack 2014 Legends (Holo-Foil)",
+        "price": 793.9,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2ca",
+        "name": "ESL One Katowice 2015 Legends (Holo-Foil)",
+        "price": 354.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2f6",
+        "name": "Boston 2018 Legends (Holo-Foil)",
+        "price": 354.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2ec",
+        "name": "Atlanta 2017 Challengers (Holo-Foil)",
+        "price": 188.6,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2c4",
+        "name": "ESL One Cologne 2014 Legends",
+        "price": 160,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2fa",
+        "name": "Boston 2018 Minor Challengers (Holo-Foil)",
+        "price": 154.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2ea",
+        "name": "Atlanta 2017 Legends (Holo-Foil)",
+        "price": 128.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2c6",
+        "name": "ESL One Cologne 2014 Challengers",
+        "price": 125.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2f8",
+        "name": "Boston 2018 Returning Challengers (Holo-Foil)",
+        "price": 124.5,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2d4",
+        "name": "DreamHack Cluj-Napoca 2015 Legends (Foil)",
+        "price": 119.9,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2e4",
+        "name": "Cologne 2016 Challengers (Holo-Foil)",
+        "price": 119.9,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2d6",
+        "name": "DreamHack Cluj-Napoca 2015 Challengers (Foil)",
+        "price": 102.3,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2e2",
+        "name": "Cologne 2016 Legends (Holo-Foil)",
+        "price": 88.2,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2d2",
+        "name": "ESL One Cologne 2015 Challengers (Foil)",
+        "price": 67.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2e0",
+        "name": "MLG Columbus 2016 Challengers (Holo-Foil)",
+        "price": 64.7,
+        "type": "capsule",
+        "last_used": 1772112962.1529078
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2f0",
+        "name": "Krakow 2017 Challengers (Holo-Foil)",
+        "price": 60.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2de",
+        "name": "MLG Columbus 2016 Legends (Holo-Foil)",
+        "price": 60.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2fe",
+        "name": "Boston 2018 Minor Challengers with Flash Gaming (Holo-Foil)",
+        "price": 54,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e302",
+        "name": "Boston 2018 Attending Legends (Holo-Foil)",
+        "price": 43.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2ee",
+        "name": "Krakow 2017 Legends (Holo-Foil)",
+        "price": 40.9,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e308",
+        "name": "London 2018 Minor Challengers (Holo-Foil)",
+        "price": 37.7,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e30e",
+        "name": "Katowice 2019 Returning Challengers (Holo-Foil)",
+        "price": 35,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2d0",
+        "name": "ESL One Cologne 2015 Legends (Foil)",
+        "price": 34.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e304",
+        "name": "London 2018 Legends (Holo-Foil)",
+        "price": 29.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e306",
+        "name": "London 2018 Returning Challengers (Holo-Foil)",
+        "price": 28.2,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2bc",
+        "name": "Sticker Capsule 2",
+        "price": 27.6,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e30c",
+        "name": "Katowice 2019 Legends (Holo-Foil)",
+        "price": 26,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e310",
+        "name": "Katowice 2019 Minor Challengers (Holo-Foil)",
+        "price": 15.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e33a",
+        "name": "Stockholm 2021 Legends Sticker Capsule",
+        "price": 12.7,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e33e",
+        "name": "Stockholm 2021 Contenders Sticker Capsule",
+        "price": 11.3,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2c2",
+        "name": "Community Sticker Capsule 1",
+        "price": 10.5,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e334",
+        "name": "Operation Riptide Sticker Collection",
+        "price": 10,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e33c",
+        "name": "Stockholm 2021 Challengers Sticker Capsule",
+        "price": 9.5,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e31e",
+        "name": "Berlin 2019 Minor Challengers (Holo-Foil)",
+        "price": 8.7,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e31c",
+        "name": "Berlin 2019 Returning Challengers (Holo-Foil)",
+        "price": 8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e31a",
+        "name": "Berlin 2019 Legends (Holo-Foil)",
+        "price": 6,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e330",
+        "name": "Riptide Surf Shop Sticker Collection",
+        "price": 6,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e332",
+        "name": "2021 Community Sticker Capsule",
+        "price": 4.2,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2f2",
+        "name": "Perfect World Sticker Capsule 1",
+        "price": 4.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e338",
+        "name": "Battlefield 2042 Sticker Capsule",
+        "price": 4.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e346",
+        "name": "10 Year Birthday Sticker Capsule",
+        "price": 4.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e34e",
+        "name": "Espionage Sticker Capsule",
+        "price": 4.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e320",
+        "name": "CS20 Sticker Capsule",
+        "price": 4.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2da",
+        "name": "Slid3 Capsule",
+        "price": 4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e300",
+        "name": "Chicken Capsule",
+        "price": 4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e340",
+        "name": "Antwerp 2022 Legends Sticker Capsule",
+        "price": 4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2f4",
+        "name": "Perfect World Sticker Capsule 2",
+        "price": 3.9,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e32e",
+        "name": "Poorly Drawn Capsule",
+        "price": 3.9,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e30a",
+        "name": "Skill Groups Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2e8",
+        "name": "Bestiary Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2d8",
+        "name": "Pinups Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e312",
+        "name": "Halo Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e314",
+        "name": "Feral Predators Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e322",
+        "name": "Half-Life: Alyx Sticker Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e34a",
+        "name": "Rio 2022 Challengers Sticker Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e34c",
+        "name": "Rio 2022 Contenders Sticker Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e336",
+        "name": "The Boardroom Sticker Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "6705734c2b333be2d884985e",
+        "name": "Ambush Sticker Capsule",
+        "price": 3.7,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e342",
+        "name": "Antwerp 2022 Challengers Sticker Capsule",
+        "price": 3.7,
+        "type": "capsule"
+    },
+    {
+        "_id": "6705734c2b333be2d8849864",
+        "name": "Copenhagen 2024 Contenders Sticker Capsule",
+        "price": 3.7,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2ba",
+        "name": "Sticker Capsule",
+        "price": 3.6,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2ce",
+        "name": "Enfu Sticker Capsule",
+        "price": 3.6,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e30e",
+        "name": "Katowice 2019 Returning Challengers (Holo-Foil)",
+        "price": 35,
+        "type": "capsule"
+    },
+    {
+        "_id": "6705734c2b333be2d8849860",
+        "name": "Copenhagen 2024 Legends Sticker Capsule",
+        "price": 3.5,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2fc",
+        "name": "Community Capsule 2018",
+        "price": 3.5,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2dc",
+        "name": "Team Roles Capsule",
+        "price": 3.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "6705734c2b333be2d8849862",
+        "name": "Copenhagen 2024 Challengers Sticker Capsule",
+        "price": 3.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e2e6",
+        "name": "Sugarface Capsule",
+        "price": 3.4,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e32c",
+        "name": "2020 RMR Contenders",
+        "price": 3.3,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e348",
+        "name": "Rio 2022 Legends Sticker Capsule",
+        "price": 3.1,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e32a",
+        "name": "2020 RMR Challengers",
+        "price": 3,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e328",
+        "name": "2020 RMR Legends",
+        "price": 3,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e352",
+        "name": "Paris 2023 Challengers Sticker Capsule",
+        "price": 2.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e354",
+        "name": "Paris 2023 Contenders Sticker Capsule",
+        "price": 2.8,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e350",
+        "name": "Paris 2023 Legends Sticker Capsule",
+        "price": 2.9,
+        "type": "capsule"
+    },
+    {
+        "_id": "6706444bd7dc8d7c0ab11c76",
+        "name": "Character Craft Stickers",
+        "price": 2,
+        "type": "capsule"
+    },
+    {
+        "_id": "670646e1d7dc8d7c0ab11c77",
+        "name": "Elemental Craft Stickers",
+        "price": 2,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e324",
+        "name": "Recoil Sticker Collection",
+        "price": 2,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e316",
+        "name": "Shattered Web Sticker Collection",
+        "price": 2,
+        "type": "capsule"
+    },
+    {
+        "_id": "64d9ecad463b7ffa9697e318",
+        "name": "Warhammer 40,000 Sticker Capsule",
+        "price": 3.8,
+        "type": "capsule"
+    }
+]

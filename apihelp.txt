@@ -1,0 +1,704 @@
+import http.server
+import socketserver
+import threading
+import subprocess
+import json
+import os
+import time
+import queue
+import tkinter as tk
+from tkinter import ttk, scrolledtext, filedialog, messagebox
+from urllib.parse import urlparse, parse_qs, unquote, urlencode
+from datetime import datetime
+import re
+
+# --- CONFIGURATION MANAGER ---
+class ConfigManager:
+    def __init__(self, filename="config.json"):
+        self.filename = filename
+        self.defaults = {
+            "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "main_profile_name": "Default",
+            "port": 9999,
+            "data_timeout": 25,
+            "phase_timeout": 300,
+            "target_item_id": "64d9ecad463b7ffa9697e2cc",
+            "target_item_type": "capsule"
+        }
+        self.config = self.defaults.copy()
+        self.load()
+
+    def load(self):
+        if not os.path.exists(self.filename):
+            print(f"[INFO] No config file found. Creating default '{self.filename}'.")
+            self.save()
+        else:
+            try:
+                with open(self.filename, 'r') as f: loaded_config = json.load(f)
+                for key, value in self.defaults.items():
+                    if key not in loaded_config: loaded_config[key] = value
+                self.config = loaded_config
+            except (json.JSONDecodeError, TypeError):
+                print(f"[ERROR] Error reading '{self.filename}'. Recreating with defaults.")
+                self.config = self.defaults.copy(); self.save()
+        
+        if not os.path.exists(self.get('chrome_path')):
+            alt_path = "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+            if os.path.exists(alt_path):
+                self.set('chrome_path', alt_path)
+                self.save()
+
+    def save(self):
+        try:
+            with open(self.filename, 'w') as f: json.dump(self.config, f, indent=4)
+        except Exception as e:
+            print(f"[ERROR] Could not save config file: {e}")
+
+    def get(self, key):
+        return self.config.get(key, self.defaults.get(key))
+
+    def set(self, key, value):
+        self.config[key] = value
+
+# --- LOCAL CASE MANAGER ---
+class CaseManager:
+    def __init__(self, filename="cases.json"):
+        self.filename = filename
+        self.cases = []
+        self.load_cases()
+
+    def load_cases(self):
+        if not os.path.exists(self.filename):
+            log_message(f"'{self.filename}' not found. Case selection will be disabled.", "ERROR")
+            self.cases = []
+            return
+        try:
+            with open(self.filename, 'r', encoding='utf-8') as f:
+                self.cases = json.load(f)
+            self.cases.sort(key=lambda x: x.get('price', 0), reverse=True)
+            log_message(f"Loaded {len(self.cases)} items from '{self.filename}'.", "SUCCESS")
+        except (json.JSONDecodeError, Exception) as e:
+            log_message(f"Error reading '{self.filename}': {e}", "ERROR")
+            self.cases = []
+            
+    def get_cases(self):
+        return self.cases
+
+# --- SHARED UTILITIES ---
+signal_queue = queue.Queue()
+log_queue = queue.Queue()
+
+class bcolors:
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    HEADER = '\033[95m'
+
+def log_message(m, l="INFO"):
+    log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] {m}"
+    log_queue.put(log_entry)
+    color = {"SUCCESS": bcolors.OKGREEN, "WARNING": bcolors.WARNING, "ERROR": bcolors.FAIL, "HEADER": bcolors.HEADER}.get(l, bcolors.ENDC)
+    print(f"{color}{log_entry}{bcolors.ENDC}")
+
+def format_number(n):
+    try:
+        return f"{int(n):,}"
+    except (ValueError, TypeError):
+        return str(n)
+
+def ensure_profile_closed(p):
+    command = f'wmic process where "name=\'chrome.exe\' and commandline like \'%--profile-directory={p}%\'" delete'
+    subprocess.run(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+
+# --- GUI WINDOWS ---
+class SettingsWindow(tk.Toplevel):
+    def __init__(self, parent, config_manager, case_manager):
+        super().__init__(parent)
+        self.title("Settings")
+        self.geometry("550x250")
+        self.transient(parent)
+        self.grab_set()
+        self.config_manager = config_manager
+        
+        self.case_map = {f"{i['name']} (${i.get('price', 0)})": (i['_id'], i.get('type', 'case')) for i in case_manager.get_cases()}
+        
+        self.vars = {
+            "chrome_path": tk.StringVar(value=config_manager.get("chrome_path")),
+            "main_profile_name": tk.StringVar(value=config_manager.get("main_profile_name")),
+            "data_timeout": tk.IntVar(value=config_manager.get("data_timeout")),
+            "phase_timeout": tk.IntVar(value=config_manager.get("phase_timeout")),
+            "default_case": tk.StringVar()
+        }
+        
+        current_id = config_manager.get("target_item_id")
+        current_selection = "No cases loaded"
+        for name, (id_val, type_val) in self.case_map.items():
+            if id_val == current_id:
+                current_selection = name
+                break
+        self.vars["default_case"].set(current_selection)
+        
+        frame = ttk.Frame(self, padding="10")
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text="Chrome Path:").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(frame, textvariable=self.vars["chrome_path"], width=60).grid(row=0, column=1, sticky="ew")
+        ttk.Button(frame, text="Browse...", command=self._browse_path).grid(row=0, column=2, padx=5)
+        
+        ttk.Label(frame, text="Main Profile Name:").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(frame, textvariable=self.vars["main_profile_name"]).grid(row=1, column=1, sticky="ew")
+        
+        ttk.Label(frame, text="Timeouts (s) [Info / Phase]:").grid(row=2, column=0, sticky="w", pady=3)
+        timeout_frame = ttk.Frame(frame)
+        timeout_frame.grid(row=2, column=1, sticky="ew")
+        ttk.Entry(timeout_frame, textvariable=self.vars["data_timeout"], width=10).pack(side=tk.LEFT)
+        ttk.Entry(timeout_frame, textvariable=self.vars["phase_timeout"], width=10).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(frame, text="Default Conversion Case:").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Combobox(frame, textvariable=self.vars["default_case"], values=list(self.case_map.keys()), state="readonly").grid(row=3, column=1, sticky="ew")
+        
+        frame.columnconfigure(1, weight=1)
+        
+        button_frame = ttk.Frame(self)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(button_frame, text="Save", command=self._save).pack(side=tk.RIGHT)
+        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+
+    def _browse_path(self):
+        path = filedialog.askopenfilename(title="Select Chrome Executable", filetypes=[("Executable files", "*.exe")])
+        if path:
+            self.vars["chrome_path"].set(path)
+
+    def _save(self):
+        special_types = {"data_timeout": int, "phase_timeout": int, "port": int}
+        for key, var in self.vars.items():
+            if key in self.config_manager.defaults:
+                try:
+                    value = var.get()
+                    if key in special_types:
+                        value = special_types[key](value)
+                    self.config_manager.set(key, value)
+                except (ValueError, tk.TclError):
+                    continue
+        
+        selected_name = self.vars["default_case"].get()
+        if selected_name in self.case_map:
+            new_id, new_type = self.case_map[selected_name]
+            self.config_manager.set("target_item_id", new_id)
+            self.config_manager.set("target_item_type", new_type)
+        
+        self.config_manager.save()
+        log_message("Settings saved.", "SUCCESS")
+        self.destroy()
+
+class CaseSelectorWindow(tk.Toplevel):
+    def __init__(self, parent, cases):
+        super().__init__(parent); self.title("Select Conversion Case"); self.geometry("400x120"); self.transient(parent); self.grab_set(); self.result=None
+        self.case_map = {f"{i['name']} (${i.get('price', 0)})": (i['_id'], i.get('type', 'case')) for i in cases}
+        frame = ttk.Frame(self, padding="10"); frame.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(frame, text="Choose a case/capsule to convert with:").pack(pady=5)
+        self.combo = ttk.Combobox(frame, values=list(self.case_map.keys()), state="readonly", width=50); self.combo.pack(pady=5)
+        if self.case_map: self.combo.current(0)
+        btn_frame = ttk.Frame(self); btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text="Confirm", command=self._confirm).pack(side=tk.RIGHT)
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+    def _confirm(self):
+        if self.combo.get(): self.result = self.case_map[self.combo.get()]; self.destroy()
+
+class AccountManagerGUI:
+    def __init__(self, root, config_manager, case_manager):
+        self.root=root; self.config_manager=config_manager; self.case_manager=case_manager; self.save_file="account_data.json"; self.root.title("Case-Clicker Orchestrator")
+        self.main_frame=ttk.Frame(root); self.initial_frame=ttk.Frame(root)
+        self.discover_button=ttk.Button(self.initial_frame,text="Discover Accounts",command=self.start_refresh_thread,style="Accent.TButton"); self.discover_button.pack(expand=True); ttk.Style().configure("Accent.TButton",font=('Calibri',14,'bold'))
+        top_frame=ttk.Frame(self.main_frame,padding="10"); top_frame.pack(fill=tk.BOTH,expand=True)
+        style=ttk.Style(); style.configure("Treeview.Heading",font=('Calibri',10,'bold')); style.configure("Treeview",rowheight=25); style.configure("SUCCESS.Treeview",foreground="green"); style.configure("LOGGEDOUT.Treeview",foreground="#d9822b"); style.configure("ERROR.Treeview",foreground="red")
+        style.configure("PROCESSING.Treeview", background="#E0E8F0")
+        self.columns=("Profile","Account Name","Pro Status","Premier Rating","Money","Tokens","Net Worth","Status"); self.tree=ttk.Treeview(top_frame,columns=self.columns,show='headings');
+        for col in self.columns: self.tree.heading(col, text=col)
+        self.tree.pack(side=tk.LEFT,fill=tk.BOTH,expand=True)
+        bottom_frame=ttk.Frame(self.main_frame,padding="5"); bottom_frame.pack(fill=tk.BOTH,expand=True)
+        button_frame=ttk.Frame(bottom_frame); button_frame.pack(pady=5)
+        self.refresh_button=ttk.Button(button_frame,text="Refresh Account Info",command=self.start_refresh_thread); self.refresh_button.pack(side=tk.LEFT,padx=5)
+        self.run_all_button=ttk.Button(button_frame,text="Run All Phases on All Eligible",command=self.run_all_eligible_accounts); self.run_all_button.pack(side=tk.LEFT,padx=5)
+        self.settings_button=ttk.Button(button_frame,text="Settings",command=self.open_settings_window); self.settings_button.pack(side=tk.LEFT,padx=5)
+        log_frame=ttk.LabelFrame(bottom_frame,text="Live Log"); log_frame.pack(fill=tk.BOTH,expand=True,padx=5,pady=5)
+        self.log_text=scrolledtext.ScrolledText(log_frame,state='disabled',wrap=tk.WORD,font=("Consolas",9)); self.log_text.pack(fill=tk.BOTH,expand=True)
+        self.status_label=tk.Label(root,text="Ready.",bd=1,relief=tk.SUNKEN,anchor=tk.W); self.status_label.pack(side=tk.BOTTOM,fill=tk.X)
+        self.context_menu=tk.Menu(root,tearoff=0); self.tree.bind("<Button-3>",self.show_context_menu)
+        if os.path.exists(self.save_file) and os.path.getsize(self.save_file)>0: self.show_main_state(); self.load_data()
+        else: self.show_initial_state()
+        self.root.protocol("WM_DELETE_WINDOW",self.on_closing); self.process_log_queue()
+    def open_settings_window(self): SettingsWindow(self.root, self.config_manager, self.case_manager)
+    def show_context_menu(self, event):
+        item_id = self.tree.identify_row(event.y)
+        if not item_id: return
+        self.tree.selection_set(item_id)
+        item_values = self.tree.item(item_id, 'values')
+        p_name = item_values[0]
+        pro_status = item_values[2]
+        is_eligible = (p_name != self.config_manager.get('main_profile_name') and pro_status == "Yes")
+        menu_state = tk.NORMAL if is_eligible else tk.DISABLED
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="Run Phase 1: Liquidate", state=menu_state, command=lambda: self.start_phase_thread(p_name, "1"))
+        self.context_menu.add_command(label="Run Phase 2: Convert", state=menu_state, command=lambda: self.start_phase_thread(p_name, "2"))
+        self.context_menu.add_command(label="Run Phase 3: Trade", state=menu_state, command=lambda: self.start_phase_thread(p_name, "3"))
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label=f"Run All Phases on '{p_name}'", state=menu_state, command=lambda: self.start_phase_thread(p_name, "all"))
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label=f"Refresh Info for '{p_name}'", command=lambda: self.start_phase_thread(p_name, "getInfo"))
+        self.context_menu.tk_popup(event.x_root, event.y_root)
+    def show_initial_state(self): self.main_frame.pack_forget(); self.initial_frame.pack(fill=tk.BOTH,expand=True); self.update_status("No account data. Click Discover.")
+    def show_main_state(self): self.initial_frame.pack_forget(); self.main_frame.pack(fill=tk.BOTH,expand=True)
+    def start_refresh_thread(self): self.show_main_state(); self.set_buttons_state(tk.DISABLED); threading.Thread(target=run_info_discovery,args=(self,self.config_manager),daemon=True).start()
+    def start_phase_thread(self,p_name,p):
+        self.show_main_state(); self.set_buttons_state(tk.DISABLED); log_message(f"--- Queuing: Phase '{p}' for '{p_name}' ---","HEADER")
+        if p in ("1", "getInfo"): t_func, args = (run_single_phase_and_finish, (self, self.config_manager, p_name, p))
+        elif p == "2": t_func,args = (run_phase_2_and_finish, (self, self.config_manager, p_name))
+        elif p == "3": t_func,args = (run_trade_phase_and_finish, (self, self.config_manager, p_name))
+        elif p == "all": t_func,args = (run_full_sequence, (self, self.config_manager, p_name))
+        threading.Thread(target=t_func, args=args, daemon=True).start()
+    def run_all_eligible_accounts(self):
+        eligible_count = len([i for i in self.tree.get_children() if self.tree.item(i,'values')[0]!=self.config_manager.get('main_profile_name') and self.tree.item(i,'values')[2]=="Yes"])
+        if eligible_count == 0:
+            messagebox.showinfo("No Eligible Accounts", "There are no eligible accounts with Pro Status = 'Yes' to run.")
+            return
+        if messagebox.askyesno("Confirm Action", f"Are you sure you want to run the full sequence on all {eligible_count} eligible accounts?"):
+            self.show_main_state(); self.set_buttons_state(tk.DISABLED); threading.Thread(target=run_all_eligible_thread,args=(self,self.config_manager),daemon=True).start()
+    def set_buttons_state(self,state): self.refresh_button.config(state=state); self.run_all_button.config(state=state); self.settings_button.config(state=state)
+    def on_closing(self): self.save_data(); self.root.destroy()
+    def save_data(self):
+        data=[dict(zip(self.columns,self.tree.item(i,'values'))) for i in self.tree.get_children()];
+        with open(self.save_file,'w') as f: json.dump(data,f,indent=4)
+        self.config_manager.save()
+    def load_data(self):
+        if not (os.path.exists(self.save_file) and os.path.getsize(self.save_file)>0): return
+        with open(self.save_file,'r') as f: data=json.load(f); self.tree.delete(*self.tree.get_children())
+        for item in data: self.add_profile_entry_from_dict(item)
+        self.resort_treeview()
+    def add_profile_entry_from_dict(self,d): vals=[d.get(c,"N/A") for c in self.columns]; s=d.get("Status","N/A"); tag={"Success":"SUCCESS.Treeview","Logged Out":"LOGGEDOUT.Treeview"}.get(s,"ERROR.Treeview"); self.tree.insert("","end",values=vals,tags=(tag,))
+    def process_log_queue(self):
+        try:
+            while not log_queue.empty(): self.log_text.config(state='normal'); self.log_text.insert(tk.END,log_queue.get_nowait()+'\n'); self.log_text.config(state='disabled'); self.log_text.see(tk.END)
+        finally: self.root.after(100,self.process_log_queue)
+    def update_status(self,m): self.status_label.config(text=m)
+    def add_profile_entry(self,p_name,info,s):
+        for i in self.tree.get_children():
+            if self.tree.item(i,"values")[0]==p_name: self.tree.delete(i)
+        if s.startswith("Running"):
+            tag = "PROCESSING.Treeview"
+        else:
+            tag = {"Success":"SUCCESS.Treeview","Logged Out":"LOGGEDOUT.Treeview"}.get(s,"ERROR.Treeview")
+        vals=(p_name,*(['N/A']*(len(self.columns)-2)),s)
+        if s=="Success": vals=(p_name,info.get('Account Name','N/A'),info.get('Pro Status','N/A'),format_number(info.get('PremierRating',0)),format_number(info.get('money',0)),format_number(info.get('tokens',0)),format_number(info.get('networth',0)),s)
+        self.tree.insert("","end",values=vals,tags=(tag,))
+        self.resort_treeview()
+    def resort_treeview(self):
+        all_items = [(self.tree.item(i, 'values'), i) for i in self.tree.get_children()]
+        main_profile_name = self.config_manager.get('main_profile_name').lower()
+        def sort_key(item_tuple):
+            values = item_tuple[0]
+            profile_name = values[0].lower()
+            is_not_main = (profile_name != main_profile_name)
+            profile_number = float('inf')
+            if profile_name.startswith('profile '):
+                parts = profile_name.split(' ')
+                if len(parts) > 1 and parts[-1].isdigit():
+                    profile_number = int(parts[-1])
+            return (is_not_main, profile_number)
+        sorted_items = sorted(all_items, key=sort_key)
+        for index, (values, item_id) in enumerate(sorted_items):
+            self.tree.move(item_id, '', index)
+
+# --- WORKER THREADS ---
+def build_url(config,phase,override_target=None):
+    base="https://case-clicker.com/"; params={'runPhase':phase}
+    target=override_target or {'id':config.get('target_item_id'),'type':config.get('target_item_type')}
+    params['targetId']=target['id']; params['targetType']=target['type']
+    page="trading" if phase=='3' else ""; return f"{base}{page}?{urlencode(params)}"
+def process_single_phase(gui,config,p_name,phase,override_target=None):
+    ensure_profile_closed(p_name); time.sleep(1)
+    while not signal_queue.empty(): signal_queue.get_nowait()
+    is_info=(phase=="getInfo"); timeout=config.get('data_timeout') if is_info else config.get('phase_timeout'); gui.add_profile_entry(p_name,{},f"Running Phase {phase}...");
+    url=build_url(config,phase,override_target)
+    proc=subprocess.Popen([config.get('chrome_path'),f"--profile-directory={p_name}",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    log_message(f"Launched '{p_name}' for phase '{phase}'. Waiting..."); success=False; timed_out=False
+    try:
+        while True:
+            s = signal_queue.get(timeout=timeout)
+            if s['type'] == 'heartbeat':
+                gui.add_profile_entry(p_name, {}, f"Running Phase {phase} (Working...)")
+                continue
+            
+            if s['type']=='info':
+                p=s['payload'];
+                if p not in ("LOGGED_OUT","ERROR"):
+                    try: gui.add_profile_entry(p_name,json.loads(p),"Success"); success=True
+                    except: gui.add_profile_entry(p_name,{},"Data Decode Error")
+                else: gui.add_profile_entry(p_name,{},"Logged Out" if p=="LOGGED_OUT" else "Userscript Error")
+            elif s['type']=='phase_success': gui.add_profile_entry(p_name,{},f"Phase {phase} Complete"); success=True
+            elif s['type']=='phase_error': gui.add_profile_entry(p_name,{},f"Phase {phase} Failed")
+            
+            break
+
+    except queue.Empty: log_message(f"Timeout for '{p_name}' phase '{phase}'.","ERROR"); gui.add_profile_entry(p_name,{},"Timed Out"); timed_out=True
+    finally:
+        if timed_out and proc.poll() is None: proc.terminate()
+    return success
+def process_trade_phase(gui,config,sender):
+    ensure_profile_closed(sender); time.sleep(1); gui.add_profile_entry(sender,{},"Running Phase 3 (Send)...");
+    while not signal_queue.empty(): signal_queue.get_nowait()
+    proc_s=subprocess.Popen([config.get('chrome_path'),f"--profile-directory={sender}",build_url(config,"3")],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    log_message(f"Launched SENDER '{sender}'. Waiting for trade ID..."); t_id=None; success=False
+    try:
+        s=signal_queue.get(timeout=config.get('phase_timeout'));
+        if s['type']=='phase_success':
+            m=re.search(r"'tradeId': \['([0-9a-f]{24})'\]",s['payload'])
+            if m: t_id=m.group(1); log_message(f"Trade by '{sender}'. ID: {t_id}","SUCCESS"); gui.add_profile_entry(sender,{},"Phase 3 (Sent)")
+        else: log_message(f"Phase 3 failed for '{sender}'.","ERROR"); gui.add_profile_entry(sender,{},"Phase 3 (Send Failed)")
+    except queue.Empty: log_message(f"Timeout for sender '{sender}'.","ERROR"); gui.add_profile_entry(sender,{},"Phase 3 (Send Timeout)")
+    if proc_s.poll() is None and t_id is None: proc_s.terminate()
+    if t_id:
+        receiver=config.get('main_profile_name'); ensure_profile_closed(receiver); time.sleep(1); gui.add_profile_entry(receiver,{},"Running Phase 3 (Accept)...")
+        proc_r=subprocess.Popen([config.get('chrome_path'),f"--profile-directory={receiver}",f"https://case-clicker.com/trading/{t_id}?autoJoin=1"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        log_message(f"Launched RECEIVER '{receiver}' to accept trade. Waiting...");
+        try:
+            a_s=signal_queue.get(timeout=config.get('phase_timeout'))
+            if a_s['type']=='phase_success': log_message(f"Trade {t_id} accepted.","SUCCESS"); gui.add_profile_entry(sender,{},"Phase 3 Complete"); success=True
+            else: log_message(f"Error while '{receiver}' accepting.","ERROR"); gui.add_profile_entry(sender,{},"Phase 3 (Accept Failed)")
+        except queue.Empty: log_message(f"Timeout for '{receiver}' to accept.","ERROR"); gui.add_profile_entry(sender,{},"Phase 3 (Accept Timeout)")
+        if proc_r.poll() is None: proc_r.terminate()
+    return success
+def get_interactive_case_choice(gui):
+    cases = gui.case_manager.get_cases()
+    if not cases: log_message("Case list is empty or not loaded. Check cases.json.","ERROR"); return None,None
+    popup=CaseSelectorWindow(gui.root,cases); gui.root.wait_window(popup)
+    if popup.result: return popup.result[0],popup.result[1]
+    return None,None
+def run_single_phase_and_finish(gui, config, p_name, phase):
+    process_single_phase(gui, config, p_name, phase)
+    gui.set_buttons_state(tk.NORMAL)
+def run_trade_phase_and_finish(gui, config, p_name):
+    process_trade_phase(gui, config, p_name)
+    gui.set_buttons_state(tk.NORMAL)
+def run_phase_2_and_finish(gui, config, p_name):
+    run_phase_2_interactive(gui, config, p_name, interactive=True)
+    gui.set_buttons_state(tk.NORMAL)
+def run_phase_2_interactive(gui,config,p_name,interactive=True):
+    target_id,target_type=None,None
+    if interactive:
+        target_id,target_type=get_interactive_case_choice(gui)
+        if not target_id: log_message("Case selection cancelled.","WARNING"); return False
+    else: target_id=config.get('target_item_id'); target_type=config.get('target_item_type')
+    return process_single_phase(gui,config,p_name,'2',override_target={'id':target_id,'type':target_type})
+def run_full_sequence(gui,config,p_name,interactive=True):
+    log_message(f"--- Starting Full Sequence for '{p_name}' ---","HEADER"); t_success=False
+    if process_single_phase(gui,config,p_name,"1"):
+        if run_phase_2_interactive(gui,config,p_name,interactive):
+            if process_trade_phase(gui,config,p_name): t_success=True
+    log_message(f"--- Full Sequence for '{p_name}' finished. ---","HEADER")
+    if t_success:
+        log_message(f"Refreshing involved accounts...","HEADER")
+        process_single_phase(gui,config,p_name,"getInfo"); process_single_phase(gui,config,config.get('main_profile_name'),"getInfo")
+    gui.set_buttons_state(tk.NORMAL)
+def run_info_discovery(gui,config):
+    gui.set_buttons_state(tk.DISABLED); log_message("Starting account info discovery...","HEADER")
+    for p in find_chrome_profiles(config):
+        process_single_phase(gui, config, p, "getInfo")
+    log_message("--- Account info discovery finished. ---","HEADER"); gui.set_buttons_state(tk.NORMAL)
+def run_all_eligible_thread(gui,config):
+    gui.set_buttons_state(tk.DISABLED); log_message("--- Starting Global Sequence (Non-Interactive) ---","HEADER")
+    main_p=config.get('main_profile_name'); eligible=[gui.tree.item(i,'values')[0] for i in gui.tree.get_children() if gui.tree.item(i,'values')[0]!=main_p and gui.tree.item(i,'values')[2]=="Yes"]
+    log_message(f"Found {len(eligible)} eligible accounts: {eligible}","SUCCESS")
+    for p in eligible: run_full_sequence(gui,config,p,interactive=False)
+    log_message("--- Global Sequence Finished ---","HEADER")
+    gui.set_buttons_state(tk.NORMAL)
+def find_chrome_profiles(config):
+    main_profile_name = config.get('main_profile_name'); base=os.path.join(os.environ.get('LOCALAPPDATA',''),'Google','Chrome','User Data');
+    if not os.path.isdir(base): return []
+    all_p=[i for i in os.listdir(base) if os.path.isdir(os.path.join(base,i)) and (i.lower()==main_profile_name.lower() or i.lower().startswith('profile '))]
+    main_p=next((p for p in all_p if p.lower()==main_profile_name.lower()),None); other_p=[p for p in all_p if p.lower()!=main_profile_name.lower()]
+    key=lambda n: int(n.split(' ')[-1]) if len(n.split(' '))>1 and n.split(' ')[-1].isdigit() else float('inf')
+    other_p.sort(key=key); final_list=[main_p]+other_p if main_p else other_p
+    log_message(f"Found and sorted {len(final_list)} profiles: {final_list}","SUCCESS"); return final_list
+class RequestHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.end_headers(); q=parse_qs(urlparse(self.path).query)
+        if 'type' in q and q['type'][0] == 'heartbeat':
+            signal_queue.put({'type':'heartbeat', 'payload': 'keep-alive'})
+        elif 'data' in q: signal_queue.put({'type':'info','payload':unquote(q['data'][0])})
+        elif 'tradeId' in q and 'ERROR' in q['tradeId']: signal_queue.put({'type':'phase_error','payload':str(q)})
+        else: signal_queue.put({'type':'phase_success','payload':str(q)})
+    def log_message(self,format,*args): return
+class ThreadingTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    pass
+def run_server(port):
+    with ThreadingTCPServer(("", port), RequestHandler) as httpd: log_message(f"HTTP server listening on localhost:{port}", "HEADER"); httpd.serve_forever()
+
+if __name__ == "__main__":
+    config = ConfigManager()
+    case_manager = CaseManager()
+    if not os.path.exists(config.get('chrome_path')):
+        print(f"{bcolors.FAIL}FATAL: Chrome not found at '{config.get('chrome_path')}'{bcolors.ENDC}")
+    else:
+        threading.Thread(target=run_server, args=(config.get('port'),), daemon=True).start()
+        root = tk.Tk()
+        app = AccountManagerGUI(root, config, case_manager)
+        root.mainloop()
+
+
+// ==UserScript==
+// @name         The Grand Orchestrator v8.1.4 (Periodic Cleaning)
+// @version      8.1.4
+// @description  Phase 2 now cleans the inventory every 10 batches, providing a balance of high speed and reliable overflow prevention.
+// @author       Jamie! Huge credit to ZSB & Gemini
+// @match        https://case-clicker.com/*
+// @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      localhost
+// @run-at       document-start
+// ==/UserScript==
+
+(async function() {
+    'use strict';
+
+    // --- CONFIG & BOILERPLATE ---
+    const params = new URLSearchParams(window.location.search);
+    const targetId = params.get('targetId') || '64d9ecad463b7ffa9697e2cc';
+    const targetType = params.get('targetType') || 'capsule';
+
+    let scriptHasRun = false;
+    const FLAG = '__OrchestratorHijacked_v8.1.4';
+    if (unsafeWindow[FLAG]) return;
+    unsafeWindow[FLAG] = true;
+
+    window.addEventListener('load', () => {
+        if (scriptHasRun) return;
+        scriptHasRun = true;
+        const phase = params.get('runPhase');
+        if      (phase === '1') runPhase1_Liquidate();
+        else if (phase === '2') runPhase2_ConvertToTokens();
+        else if (phase === '3') runPhase3_TradeTokens();
+        else if (phase === 'getInfo') runPhase_GetInfo();
+        else if (params.get('autoJoin') === '1') runGuestJoinLogic();
+    });
+
+    // --- UTILITY FUNCTIONS ---
+    function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    // --- PHASE: GET INFO ---
+    async function runPhase_GetInfo() {
+        let signalData = 'LOGGED_OUT';
+        const fetchHeaders = new Headers();
+        fetchHeaders.append('Cache-Control', 'no-cache');
+        fetchHeaders.append('Pragma', 'no-cache');
+
+        for (let attempts = 0; attempts < 10; attempts++) {
+            try {
+                const r = await fetch('/api/me', { method: 'GET', headers: fetchHeaders });
+                if (r.ok && r.status === 200) {
+                    const me = await r.json();
+                    if (me && me.networth !== undefined) {
+                        let accountName = 'Unknown';
+                        for (let i = 0; i < 20; i++) {
+                            const profileLinkElement = document.querySelector('a[href^="/profile/"]');
+                            if (profileLinkElement && profileLinkElement.textContent.trim()) {
+                                accountName = profileLinkElement.textContent.trim();
+                                break;
+                            }
+                            await delay(250);
+                        }
+                        const payload = {
+                            "Account Name": accountName, "Pro Status": (me.membership && me.membership === 'pro') ? 'Yes' : 'No',
+                            "PremierRating": me.premierRating || 0, "money": me.money || 0,
+                            "tokens": me.tokens || 0, "networth": me.networth || 0
+                        };
+                        signalData = encodeURIComponent(JSON.stringify(payload));
+                        break;
+                    }
+                }
+                await delay(1000);
+            } catch (e) { signalData = 'ERROR'; break; }
+        }
+        GM_xmlhttpRequest({
+            method: 'GET', url: `http://localhost:9999/?data=${signalData}`,
+            onload: () => window.open('', '_self').close(),
+            onerror: () => window.open('', '_self').close()
+        });
+    }
+
+    // --- HEARTBEAT & FINAL SIGNALS ---
+    function signalHeartbeat() { GM_xmlhttpRequest({ method: 'GET', url: 'http://localhost:9999/?type=heartbeat' }); }
+    function signalPhaseComplete(tradeId = null, tokens = 0, error = false) {
+        const p = new URLSearchParams();
+        if (error) p.append('tradeId', 'ERROR');
+        else if (tradeId) p.append('tradeId', tradeId);
+        p.append('tokens', Math.floor(tokens));
+        GM_xmlhttpRequest({
+            method: 'GET', url: 'http://localhost:9999/?' + p,
+            onload: () => setTimeout(() => window.open('', '_self').close(), 1500),
+            onerror: () => setTimeout(() => window.open('', '_self').close(), 1500)
+        });
+    }
+
+    // --- PHASE 1: LIQUIDATE ---
+    async function runPhase1_Liquidate() {
+        try {
+            const defs = [];
+            for (const t of ['cases', 'capsules', 'souvenir']) {
+                const r = await fetch(`/api/cases/${t}`); if (!r.ok) continue;
+                const items = await r.json(); items.forEach(x => x.type = t.slice(0, -1)); defs.push(...items);
+            }
+            const inv = await (await fetch('/api/cases', {cache: 'no-cache'})).json();
+            for (const item of inv) {
+                if (item.amount < 1 || item._id === targetId) continue;
+                const def = defs.find(x => x._id === item._id); if (!def) continue;
+                await fetch('/api/cases', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: item._id, amount: item.amount, type: def.type }) });
+                await delay(200);
+            }
+            signalPhaseComplete();
+        } catch (e) { signalPhaseComplete(null, 0, true); }
+    }
+
+    // --- PHASE 2: CONVERT ---
+    async function runPhase2_ConvertToTokens() {
+        try {
+            let ok = false;
+            while (!ok) { ok = await fetchItemDetails_v2(); if (!ok) await delay(15000); }
+            await stableBuyOpenLoop_v2_FIXED();
+            signalPhaseComplete();
+        } catch (err) {
+            const retryable = unsafeWindow.__wsError || /no-response|ERR_FAILED|network error|Failed to fetch|blocked by CORS/i.test(err.message);
+            unsafeWindow.__wsError = false;
+            const params = new URLSearchParams(window.location.search);
+            const prev = +params.get('retry') || 0;
+            if (retryable && prev < 3) {
+                params.set('retry', prev + 1); params.set('runPhase', '2');
+                setTimeout(() => { window.location.replace(window.location.origin + window.location.pathname + '?' + params.toString()); }, 3000);
+            } else { signalPhaseComplete(null, 0, true); }
+        }
+    }
+
+    // --- PHASE 3: TRADE ---
+    async function runPhase3_TradeTokens() {
+        try {
+            await delay(1500);
+            const tradeBtn = await waitForEnabledButtonWithTexts('Create Trade', 'Go to trade'); if (!tradeBtn) throw new Error('Timeout waiting for trade button');
+            tradeBtn.click();
+            let tradeId_ = null;
+            const deadline = performance.now() + 15000;
+            while (performance.now() < deadline) { const m = window.location.pathname.match(/\/trading\/([0-9a-f]{24})/); if (m) { tradeId_ = m[1]; break; } await delay(250); }
+            if (!tradeId_) throw new Error('Timed out waiting for trade URL');
+            const me = await (await fetch('/api/me')).json(); const qty = me.tokens; if (!qty || qty < 1) return signalPhaseComplete('NO_TOKENS', 0);
+            const btnAdd = await waitForText('button', 'Add Tokens'); if (!btnAdd) throw new Error('Could not find Add Tokens button');
+            btnAdd.click();
+            const pAvail = await waitForPContains('Available Tokens:'); const modal = pAvail.closest('[role="dialog"]'); const inp = modal.querySelector('input'); inp.focus();
+            document.execCommand('selectAll', false, null); document.execCommand('insertText', false, String(Math.floor(qty))); inp.dispatchEvent(new InputEvent('input', {bubbles: true})); await delay(500);
+            const depBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.trim() === 'Deposit'); await waitEnabled(depBtn); depBtn.click(); await delay(700);
+            const closeBtn = modal.querySelector('button[aria-label="Close"]'); if (closeBtn) closeBtn.click(); await delay(500);
+            const chk2 = await waitForElement('input[type="checkbox"]:not(:checked)'); if (!chk2) throw new Error('Could not find Accept Trade checkbox'); chk2.click();
+            signalPhaseComplete(tradeId_, qty);
+        } catch (err) { handleRetry('Phase 3', '3', err, '/trading?'); }
+    }
+
+    // --- GUEST JOIN ---
+    async function runGuestJoinLogic() {
+        try {
+            await delay(2000);
+            const chk = await waitForElement('input[type="checkbox"]:not(:checked)'); if (!chk) throw new Error('Could not find Accept Trade checkbox'); chk.click();
+            const btn = await waitForText('button', 'Confirm Trade'); if (!btn) throw new Error('Could not find Confirm Trade button'); await waitEnabled(btn, 10000); if (btn.disabled) throw new Error('Confirm Trade button never enabled'); btn.click();
+            signalPhaseComplete('GUEST_OK');
+        } catch (err) { handleRetry('Guest Join', 'autoJoin', err); }
+    }
+
+    // --- GENERIC RETRY HANDLER ---
+    function handleRetry(phaseName, phaseParam, err, retryUrlBase = window.location.pathname + '?') {
+        const retryable = unsafeWindow.__wsError || /no-response|ERR_FAILED|network error|Failed to fetch|blocked by CORS/i.test(err.message);
+        unsafeWindow.__wsError = false;
+        const params_ = new URLSearchParams(window.location.search); const prev = +params_.get('retry') || 0;
+        if (retryable && prev < 3) {
+            params_.set('retry', prev + 1); if(phaseParam === 'autoJoin') params_.set('autoJoin', '1'); else params_.set('runPhase', phaseParam);
+            setTimeout(() => { window.location.replace(window.location.origin + retryUrlBase + params_.toString()); }, 3000);
+        } else { signalPhaseComplete(null, 0, true); }
+    }
+
+    // --- HELPERS ---
+    let currentItemPrice = 0;
+    async function fetchItemDetails_v2() {
+        try {
+            const dom = new DOMParser().parseFromString(await (await fetch(window.location.origin)).text(), "text/html");
+            const buildId = JSON.parse(dom.querySelector("script#__NEXT_DATA__").textContent).buildId;
+            const dataUrls = [`/_next/data/${buildId}/en/cases/cases.json`, `/_next/data/${buildId}/en/cases/capsules.json`];
+            for (const resp of await Promise.all(dataUrls.map(u => fetch(u)))) {
+                if (!resp.ok) continue; const data = await resp.json();
+                const itemsStr = data.pageProps.cases || data.pageProps.capsules || "[]";
+                const items = JSON.parse(itemsStr); const target = items.find(i => i._id === targetId);
+                if (target) { currentItemPrice = target.price; return true; }
+            } return false;
+        } catch (err) { return false; }
+    }
+
+    async function sellAllInventoryForTokens() {
+        await fetch(`/api/inventory`, {
+            method: "DELETE",
+            body: JSON.stringify({ type: "price", value: 999999, currency: "tokens" }),
+            headers: { "Content-Type": "application/json" },
+        });
+    }
+
+    // --- PERIODIC CLEANING BATCH-BY-BATCH PROCESSING ---
+    async function stableBuyOpenLoop_v2_FIXED() {
+        const initialMeData = await (await fetch("/api/me")).json();
+        const amountToBuy = Math.floor(initialMeData.money / currentItemPrice);
+        if (amountToBuy > 0) {
+            await fetch("/api/cases", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: targetId, type: targetType, amount: amountToBuy }) });
+            await delay(600);
+        }
+
+        await processAllBatches();
+    }
+
+    async function processAllBatches() {
+        let batchCounter = 0; // Initialize batch counter
+        let keepProcessing = true;
+
+        while (keepProcessing) {
+            const caseInv = await (await fetch("/api/cases", { cache: 'no-cache' })).json();
+            const targetItem = caseInv.find(item => item._id === targetId);
+
+            if (!targetItem || targetItem.amount <= 0) {
+                keepProcessing = false;
+                break;
+            }
+
+            batchCounter++; // Increment counter for each batch
+
+            // Every 10 batches, run the cleaning process.
+            if (batchCounter >= 10) {
+                await sellAllInventoryForTokens();
+                await delay(300);
+                batchCounter = 0; // Reset the counter
+            }
+
+            const meData = await (await fetch("/api/me")).json();
+            const countForApi = Math.min(meData.caseOpenCount, Math.ceil(targetItem.amount / meData.maxCaseOpenMultiplier));
+            const payload = { id: targetId, quickOpen: true, autoOpenConfig: { autosellActivated: true, autosellVariant: "tokens" } };
+
+            await fetch("/api/open/capsule", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...payload, count: String(countForApi) })
+            });
+
+            signalHeartbeat();
+            await delay(700);
+        }
+        // Final cleanup after the loop is finished, just in case.
+        await sellAllInventoryForTokens();
+    }
+    async function waitForElement(s,t=15000){const e=Date.now()+t;while(Date.now()<e){const l=document.querySelector(s);if(l)return l;await delay(250)}return null}
+    async function waitForText(s,t,o=15000){const e=Date.now()+o;while(Date.now()<e){const n=Array.from(document.querySelectorAll(s)).find(e=>e.textContent.trim()===t);if(n)return n;await delay(200)}return null}
+    async function waitForPContains(s,t=15000){const e=Date.now()+t;while(Date.now()<e){const o=Array.from(document.querySelectorAll("p")).find(p=>p.textContent.includes(s));if(o)return o;await delay(200)}return null}
+    async function waitEnabled(s,t=10000){const e=Date.now()+t;while(Date.now()<e){if(s&&!s.disabled)return!0;await delay(100)}return!1}
+    async function waitForEnabledButtonWithTexts(s,t,e=15000){const o=Date.now()+e;while(Date.now()<o){const n=Array.from(document.querySelectorAll("button")).find(b=>!b.disabled&&(b.textContent.trim()===s||b.textContent.trim()===t));if(n)return n;await delay(250)}return null}
+})();

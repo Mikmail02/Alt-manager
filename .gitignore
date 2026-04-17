@@ -1,0 +1,32 @@
+# Runtime data (will live in %APPDATA% after refactor)
+accounts.json
+settings.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.spec.bak
+
+# Installer output
+installer/Output/
+
+# Tools
+ngrok.exe
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets / local config
+.env
+config.local.json
