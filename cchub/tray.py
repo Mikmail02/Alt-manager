@@ -166,8 +166,8 @@ def _worker_base_url() -> str:
         return override
     detected = network.detect_tailscale_ip()
     if detected:
-        return f"https://{detected}:5000"
-    return "https://127.0.0.1:5000"
+        return f"http://{detected}:5000"
+    return "http://127.0.0.1:5000"
 
 
 def _copy_worker_link() -> None:
@@ -229,7 +229,7 @@ def _show_remote_access_dialog() -> None:
             else:
                 info_text = (
                     "No Tailscale detected. Paste the URL that workers\n"
-                    "should connect to (e.g. https://100.x.y.z:5000)."
+                    "should connect to (e.g. http://100.x.y.z:5000)."
                 )
                 info_fg = "#a1a1aa"
 
@@ -267,18 +267,9 @@ def _show_remote_access_dialog() -> None:
             def _save() -> None:
                 raw = entry_var.get().strip().rstrip("/")
                 if raw and not re.match(r"^https?://", raw, re.IGNORECASE):
-                    raw = "https://" + raw
+                    raw = "http://" + raw
                 app_config.set_public_url(raw)
-                host = _extract_host(raw)
-                current = list(app_config.extra_cert_hosts())
-                if host and host not in current:
-                    current.append(host)
-                    app_config.set_extra_cert_hosts(current)
-                    status_var.set(
-                        "Saved. Restart Case Clicker Hub to regenerate the TLS cert."
-                    )
-                else:
-                    status_var.set("Saved.")
+                status_var.set("Saved.")
 
             def _clear() -> None:
                 entry_var.set("")
@@ -672,7 +663,7 @@ def _wait_for_server(timeout: float = 5.0) -> None:
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     deadline = time.time() + timeout
-    url = "https://127.0.0.1:5000/api/ping"
+    url = "http://127.0.0.1:5000/api/ping"
     while time.time() < deadline:
         try:
             urllib.request.urlopen(url, timeout=0.5, context=ctx)
@@ -702,7 +693,7 @@ def main() -> int:
 
     _window = webview.create_window(
         title=f"{APP_NAME} {__version__}",
-        url="https://127.0.0.1:5000/",
+        url="http://127.0.0.1:5000/",
         width=1280,
         height=820,
         min_size=(_MIN_W, _MIN_H),

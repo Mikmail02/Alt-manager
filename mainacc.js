@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CC Hub Main Worker
 // @namespace    https://github.com/Mikmail02/Alt-manager
-// @version      1.0.4
+// @version      1.0.6
 // @description  Main worker for Case Clicker Hub desktop app
 // @author       Mikmail
 // @match        *://*.case-clicker.com/*
@@ -158,7 +158,7 @@
             <div id="drag-handle" style="padding: 12px 14px; background: linear-gradient(180deg, rgba(255,215,0,0.08), transparent); border-bottom: 1px solid rgba(124,111,58,0.4); cursor: move; display: flex; align-items: center; gap: 10px; user-select: none;">
                 <div id="aw-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #6b7280; box-shadow: 0 0 8px rgba(107,114,128,0.5); transition: all .2s;"></div>
                 <div style="font-weight: 700; color: #ffd700; font-size: 13px; letter-spacing: .02em; flex: 1;">Main Manager Worker</div>
-                <div style="font-size: 10px; color: #8b7d45; font-variant-numeric: tabular-nums;">v1.0.4</div>
+                <div style="font-size: 10px; color: #8b7d45; font-variant-numeric: tabular-nums;">v1.0.6</div>
             </div>
             <div style="padding: 12px;">
                 <div class="aw-row" style="margin-bottom: 8px;">
@@ -415,7 +415,7 @@
         lastNWT = null;
     }
 
-    const DEFAULT_BACKEND_URL = 'https://127.0.0.1:5000';
+    const DEFAULT_BACKEND_URL = 'http://127.0.0.1:5000';
     const TOKEN_KEY = 'cchub_token';
 
     function normalizeBaseUrl(url) {
@@ -428,7 +428,7 @@
             v = v.slice(0, hashIdx).trim();
         }
         if (!v) return '';
-        if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
+        if (!/^https?:\/\//i.test(v)) v = `http://${v}`;
         v = v.replace(/\/+$/, '');
         v = v.replace(/\/api(?:\/.*)?$/i, '');
         return v;

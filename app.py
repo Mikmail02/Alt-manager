@@ -5,7 +5,7 @@ import time
 import tempfile
 import threading
 from datetime import datetime
-from flask import Flask, render_template_string, request, jsonify, send_file, abort
+from flask import Flask, render_template_string, request, jsonify
 
 from cchub import auth, config as app_config, paths
 from cchub.version import __version__
@@ -35,31 +35,12 @@ def api_ping():
 @app.route("/config")
 def panel_config():
     public = app_config.public_url()
-    base = public if public else f"https://127.0.0.1:{PORT}"
+    base = public if public else f"http://127.0.0.1:{PORT}"
     return jsonify({
         "token": app_config.token(),
         "version": __version__,
         "base_url": base,
     })
-
-
-@app.route("/ca.crt")
-def ca_cert_download():
-    """Serve the public CA cert so non-Windows workers (e.g. Linux VPS) can trust the hub.
-
-    The CA cert contains no private material. Workers on other machines download it
-    and add it to their system/browser trust store so GM_xmlhttpRequest TLS works.
-    """
-    from cchub import cert_manager
-    ca_path = paths.CERT_DIR / cert_manager.CA_CERT
-    if not ca_path.exists():
-        abort(404)
-    return send_file(
-        str(ca_path),
-        mimetype="application/x-pem-file",
-        as_attachment=True,
-        download_name="cchub-ca.crt",
-    )
 
 def load_db():
     if not os.path.exists(DATA_FILE):
@@ -2590,19 +2571,10 @@ HTML_UI = """
 """
 
 def run_server(host: str = HOST, port: int = PORT) -> None:
-    from cchub import cert_manager, network
-
-    extra = list(app_config.extra_cert_hosts())
-    detected = network.detect_tailscale_ip()
-    if detected and detected not in extra:
-        extra.append(detected)
-    cert_path, key_path = cert_manager.ensure_certs(tuple(extra))
-    cert_manager.install_ca_to_windows_store()
-    print(f"--- Case Clicker Hub {__version__} listening on https://{host}:{port} ---")
+    print(f"--- Case Clicker Hub {__version__} listening on http://{host}:{port} ---")
     app.run(
         host=host,
         port=port,
-        ssl_context=(str(cert_path), str(key_path)),
         threaded=True,
         use_reloader=False,
     )
