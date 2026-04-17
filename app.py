@@ -1404,7 +1404,11 @@ HTML_UI = """
             </div>
             <div id="tokenAmountWrap" style="display:none; margin-bottom:12px;">
                 <div style="font-size:10px; color:#777; margin-bottom:6px; text-transform:uppercase;">Token Amount To Transfer</div>
-                <input id="tokenAmountInput" type="number" min="1" step="1" placeholder="Enter amount..." style="width:100%; padding:10px; background:#111; border:1px solid var(--border); color:#fff; border-radius:8px; font-family:'JetBrains Mono'; box-sizing:border-box;">
+                <div style="display:flex; gap:10px;">
+                    <input id="tokenAmountInput" type="number" min="1" step="1" placeholder="Enter amount..." style="flex:1; padding:10px; background:#111; border:1px solid var(--border); color:#fff; border-radius:8px; font-family:'JetBrains Mono'; box-sizing:border-box;">
+                    <button onclick="setMaxTokens()" style="padding:10px 20px; background:var(--accent); color:#000; border:none; border-radius:8px; cursor:pointer; font-weight:700;">MAX</button>
+                </div>
+                <div id="tokenAvailable" style="margin-top:6px; font-size:11px; color:#888;"></div>
             </div>
             <button class="big-btn" onclick="runTransfer()">INITIATE TRANSFER</button>
         </div>
@@ -2020,7 +2024,20 @@ HTML_UI = """
         if(!acc) return;
         const tokenWrap = document.getElementById('tokenAmountWrap');
         if(tokenWrap) tokenWrap.style.display = transferState.tok ? 'block' : 'none';
+        const availEl = document.getElementById('tokenAvailable');
+        if(availEl) {
+            const tokens = Math.floor(Number(acc.stats?.tokens || 0));
+            availEl.innerText = `Available: ${tokens.toLocaleString()}`;
+        }
         renderConvertCaseSummaryState(acc);
+    }
+
+    function setMaxTokens() {
+        const acc = accounts.find(a => a.id === selectedId);
+        if(!acc || !acc.stats) return;
+        const maxTokens = Math.floor(Number(acc.stats.tokens || 0));
+        const input = document.getElementById('tokenAmountInput');
+        if(input) input.value = maxTokens;
     }
 
     function renderConvertCaseSummaryState(acc) {
