@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CC Hub Alt Worker
 // @namespace    https://github.com/Mikmail02/Alt-manager
-// @version      5.0.0
+// @version      1.0.1
 // @description  Alt worker for Case Clicker Hub desktop app
 // @author       Mikmail
 // @match        *://*.case-clicker.com/*
@@ -53,28 +53,24 @@
     let isScanning = false;
     let cachedProfileImage = null;
     let cachedProfileMeta = null;
-    let lastSocketCheck = Date.now();
-    let socketCheckInterval = null;
-    let heartbeatInterval = null;
+    let heartbeatTimer = null;
     let heartbeatInFlight = false;
-    let consecutiveSocketFailures = 0;
-    let lastHeartbeatSuccess = Date.now();
-    let lastRefreshAt = 0;
     let statusFetchInFlight = false;
     let statusLastFetchAt = 0;
     let statusCasePriceMap = null;
     let statusCasePriceMapAt = 0;
-    let lastSocketWarnLogAt = 0;
     let isConnected = false;
-    let consecutiveHeartbeatFailures = 0;
-    const HEARTBEAT_FAILURES_BEFORE_STOP = 5;
-    const SOCKET_CHECK_MS = 10000;
-    const SOCKET_FAILURES_BEFORE_REFRESH = 3;
-    const REFRESH_GRACE_MS = 90000;
+    let connState = 'idle'; // idle | connecting | connected | reconnecting
+    let activeBaseUrl = '';
+    let cachedMe = null;
     let connectedSince = 0;
-    const HEARTBEAT_TIMEOUT_MS = 180000;
-    const REFRESH_COOLDOWN_MS = 300000;
+    let lastHeartbeatSuccess = 0;
+    let totalErrors = 0;
+    let heartbeatBackoffMs = 8000;
     const HEARTBEAT_INTERVAL_MS = 8000;
+    const HEARTBEAT_BACKOFF_MAX_MS = 120000;
+    const HEARTBEAT_REQUEST_TIMEOUT_MS = 15000;
+    const REFRESH_GRACE_MS = 90000;
     const STATUS_PANEL_TICK_MS = 1000;
     const STATUS_NETWORK_MS = 20000;
     const STATUS_CASE_CACHE_MS = 300000;
@@ -89,7 +85,6 @@
     const CLICK_KEY = 'am.click.enabled.alt';
     const VAULT_KEY = 'am.vault.enabled.alt';
     const NUKE_KEY = 'am.nuke.enabled.alt';
-    let totalErrors = 0;
     let nextClickAt = 0;
     let statusUiInterval = null;
     let currentTab = 'console';
@@ -97,7 +92,12 @@
     window.addEventListener('load', () => {
         initUI();
         setTimeout(scanInventory, 3000);
-        startSocketMonitoring();
+        // Auto-reconnect if we had a connected session before a reload.
+        const savedUrl = GM_getValue('ngrok_url', '');
+        const autoOn = GM_getValue('am.autoconnect.alt', false);
+        if (autoOn && savedUrl && cchubToken()) {
+            setTimeout(() => startLoop(savedUrl), 500);
+        }
     });
 
     function initUI() {
@@ -195,17 +195,56 @@
         if (statusUiInterval) clearInterval(statusUiInterval);
         statusUiInterval = setInterval(updateStatusPanel, STATUS_PANEL_TICK_MS);
 
+        const urlInput = document.getElementById('ngrok_url');
+        // Keep the input usable: stop the host page from eating paste / key events.
+        ['paste', 'copy', 'cut', 'keydown', 'keyup', 'keypress', 'input'].forEach(ev => {
+            urlInput.addEventListener(ev, (e) => e.stopPropagation(), true);
+        });
+        urlInput.addEventListener('input', refreshConnectButton);
+
         document.getElementById('btn_link').onclick = () => {
-            if (isConnected) {
+            const raw = urlInput.value;
+            const url = normalizeBaseUrl(raw);
+            // Active connection states (connecting/connected/reconnecting): button is "DISCONNECT"
+            // unless the URL has changed, in which case it reconnects with the new URL.
+            if (connState === 'connected' || connState === 'connecting' || connState === 'reconnecting') {
+                if (url && url !== activeBaseUrl) {
+                    GM_setValue('ngrok_url', url);
+                    log('URL changed — reconnecting to ' + url);
+                    disconnect(/*keepAutoReconnect*/ true);
+                    setTimeout(() => startLoop(url), 200);
+                    return;
+                }
                 disconnect();
                 return;
             }
-            const url = normalizeBaseUrl(document.getElementById('ngrok_url').value);
             if (!url) { log("Enter a valid URL, then click CONNECT."); return; }
             GM_setValue('ngrok_url', url);
             startLoop(url);
         };
         document.getElementById('btn_ping').onclick = () => pingLink();
+        refreshConnectButton();
+    }
+
+    function refreshConnectButton() {
+        const btn = document.getElementById('btn_link');
+        const inp = document.getElementById('ngrok_url');
+        if (!btn || !inp) return;
+        const urlNow = normalizeBaseUrl(inp.value);
+        const active = connState === 'connected' || connState === 'connecting' || connState === 'reconnecting';
+        if (active && urlNow && urlNow !== activeBaseUrl) {
+            btn.textContent = 'APPLY URL';
+            btn.style.background = '#2563eb';
+            btn.title = 'Reconnect using the new URL';
+        } else if (active) {
+            btn.textContent = 'DISCONNECT';
+            btn.style.background = '#b91c1c';
+            btn.title = '';
+        } else {
+            btn.textContent = 'CONNECT';
+            btn.style.background = '#10b981';
+            btn.title = '';
+        }
     }
 
     function log(msg) {
@@ -331,72 +370,130 @@
         return GM_xmlhttpRequest(Object.assign({}, opts, { headers }));
     }
 
-    function setConnState(ok) {
+    function setConnState(state) {
+        connState = state;
+        isConnected = state === 'connected';
         const el = document.getElementById('conn_state');
-        if (!el) return;
-        el.textContent = ok ? 'CONNECTED' : 'DISCONNECTED';
-        el.style.color = ok ? '#10b981' : '#9ca3af';
-        el.style.borderColor = ok ? '#10b98155' : '#333';
-        const btn = document.getElementById('btn_link');
-        if (btn) {
-            btn.textContent = isConnected ? 'DISCONNECT' : 'CONNECT';
-            btn.style.background = isConnected ? '#b91c1c' : '#10b981';
+        if (el) {
+            const map = {
+                idle:         ['DISCONNECTED',   '#9ca3af', '#333'],
+                connecting:   ['CONNECTING...',  '#eab308', '#eab30855'],
+                connected:    ['CONNECTED',      '#10b981', '#10b98155'],
+                reconnecting: ['RECONNECTING...','#f59e0b', '#f59e0b55'],
+            };
+            const [label, color, border] = map[state] || map.idle;
+            el.textContent = label;
+            el.style.color = color;
+            el.style.borderColor = border;
         }
+        refreshConnectButton();
     }
 
-    function disconnect() {
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-            heartbeatInterval = null;
-        }
-        consecutiveSocketFailures = 0;
-        consecutiveHeartbeatFailures = 0;
+    function disconnect(keepAutoReconnect) {
+        if (heartbeatTimer) { clearTimeout(heartbeatTimer); heartbeatTimer = null; }
+        heartbeatInFlight = false;
+        heartbeatBackoffMs = HEARTBEAT_INTERVAL_MS;
+        activeBaseUrl = '';
+        cachedMe = null;
         connectedSince = 0;
-        isConnected = false;
-        setConnState(false);
-        log("Disconnected. Change the URL above and click CONNECT to use a different link.");
+        if (!keepAutoReconnect) GM_setValue('am.autoconnect.alt', false);
+        setConnState('idle');
+        log("Disconnected.");
     }
 
     function pingLink() {
         const baseUrl = normalizeBaseUrl(document.getElementById('ngrok_url').value);
-        if (!baseUrl) {
-            log('No URL set.');
-            return;
-        }
+        if (!baseUrl) { log('No URL set.'); return; }
         gmRequest({
             method: "GET",
             url: `${baseUrl}/api/settings`,
+            timeout: 10000,
             onload: (res) => {
                 const ok = res.status >= 200 && res.status < 300;
-                setConnState(ok);
                 log(`Ping ${ok ? 'OK' : 'FAIL'} (${res.status}) -> ${baseUrl}`);
             },
-            onerror: () => {
-                setConnState(false);
-                log(`Ping ERROR -> ${baseUrl}`);
-            }
+            onerror: () => log(`Ping ERROR -> ${baseUrl}`),
+            ontimeout: () => log(`Ping TIMEOUT -> ${baseUrl}`),
         });
     }
 
     function startLoop(url) {
         const baseUrl = normalizeBaseUrl(url);
-        if (!baseUrl) {
-            log("Invalid URL.");
-            setConnState(false);
-            return;
-        }
-        isConnected = false;
-        consecutiveHeartbeatFailures = 0;
-        setConnState(false);
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-            heartbeatInterval = null;
-        }
-        log("Connecting...");
+        if (!baseUrl) { log("Invalid URL."); return; }
+        if (heartbeatTimer) { clearTimeout(heartbeatTimer); heartbeatTimer = null; }
+        heartbeatInFlight = false;
+        activeBaseUrl = baseUrl;
+        heartbeatBackoffMs = HEARTBEAT_INTERVAL_MS;
         connectedSince = Date.now();
-        heartbeatInterval = setInterval(function() { heartbeat(baseUrl); }, HEARTBEAT_INTERVAL_MS);
+        GM_setValue('am.autoconnect.alt', true);
+        setConnState('connecting');
+        log("Connecting to " + baseUrl);
         heartbeat(baseUrl);
         toggleClickLoop();
+    }
+
+    function scheduleHeartbeat(delayMs) {
+        if (heartbeatTimer) clearTimeout(heartbeatTimer);
+        if (!activeBaseUrl) return;
+        heartbeatTimer = setTimeout(() => {
+            heartbeatTimer = null;
+            heartbeat(activeBaseUrl);
+        }, Math.max(500, delayMs | 0));
+    }
+
+    function onHeartbeatSuccess(res, me) {
+        heartbeatBackoffMs = HEARTBEAT_INTERVAL_MS;
+        lastHeartbeatSuccess = Date.now();
+        cachedMe = me;
+        const wasConnected = connState === 'connected';
+        setConnState('connected');
+        if (!wasConnected) log('Link ok.');
+        try {
+            const json = JSON.parse(res.responseText);
+            if (json && Array.isArray(json.commands) && json.commands.length > 0) {
+                json.commands.forEach(cmd => {
+                    if (cmd.type === 'refresh_page') {
+                        if (window.__CONVERT_ACTIVE || window.__BOOSTER_ACTIVE) {
+                            log("Skipping refresh — job in progress");
+                            return;
+                        }
+                        const grace = Date.now() - connectedSince;
+                        if (grace < REFRESH_GRACE_MS) {
+                            log("Skipping refresh — connected " + Math.round(grace/1000) + "s ago");
+                            return;
+                        }
+                        log("Refresh requested by backend.");
+                        setTimeout(() => window.location.reload(), 1000);
+                        return;
+                    }
+                    executeCommand(cmd, me, activeBaseUrl);
+                });
+            }
+        } catch (_) {}
+        scheduleHeartbeat(heartbeatBackoffMs);
+    }
+
+    function onHeartbeatFailure(reason) {
+        totalErrors++;
+        if (connState === 'connected') {
+            setConnState('reconnecting');
+            log('Link lost (' + reason + '). Retrying with backoff…');
+        } else if (connState === 'connecting') {
+            setConnState('reconnecting');
+            log('Connect failed (' + reason + '). Retrying…');
+        }
+        heartbeatBackoffMs = Math.min(HEARTBEAT_BACKOFF_MAX_MS, Math.max(HEARTBEAT_INTERVAL_MS, Math.round(heartbeatBackoffMs * 1.6)));
+        scheduleHeartbeat(heartbeatBackoffMs);
+    }
+
+    function getCapturedSocketNonStrict() {
+        // Non-strict variant used for status display — does not mutate anything.
+        if (unsafeWindow.__CC_SOCKET__) return unsafeWindow.__CC_SOCKET__;
+        const pool = unsafeWindow.__CC_SOCKETS__ || [];
+        for (let i = pool.length - 1; i >= 0; i--) {
+            if (pool[i]) return pool[i];
+        }
+        return null;
     }
 
     function parseJwt(token) {
@@ -510,13 +607,6 @@
         return null;
     }
 
-    function canRefreshNow() {
-        const now = Date.now();
-        if (now - lastRefreshAt < REFRESH_COOLDOWN_MS) return false;
-        lastRefreshAt = now;
-        return true;
-    }
-
     async function runClickBatch() {
         if (!GM_getValue(CLICK_KEY, true)) return;
         nextClickAt = Date.now() + CLICK_INTERVAL_MS;
@@ -551,42 +641,10 @@
         clickTimer = setInterval(runClickBatch, CLICK_INTERVAL_MS);
     }
 
-    // --- WEBSOCKET MONITORING & AUTO-REFRESH ---
-    function startSocketMonitoring() {
-        if (socketCheckInterval) clearInterval(socketCheckInterval);
-        socketCheckInterval = setInterval(() => {
-            const socket = getCapturedSocket();
-            const now = Date.now();
-            
-            // Check if socket is missing or disconnected
-            if (!socket || socket.readyState !== 1) {
-                consecutiveSocketFailures++;
-                if (now - lastSocketWarnLogAt > 60000) {
-                    log(`Socket disconnected (${consecutiveSocketFailures} checks)`);
-                    lastSocketWarnLogAt = now;
-                }
-                
-                if (consecutiveSocketFailures >= SOCKET_FAILURES_BEFORE_REFRESH && !window.__CONVERT_ACTIVE && !window.__BOOSTER_ACTIVE && canRefreshNow()) {
-                    log("Socket failed " + SOCKET_FAILURES_BEFORE_REFRESH + " times in a row. Refreshing page...");
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
-                    return;
-                }
-            } else {
-                consecutiveSocketFailures = 0;
-            }
-            
-            // Check if heartbeat hasn't succeeded in a while.
-            const heartbeatTimeout = now - lastHeartbeatSuccess;
-            if (heartbeatTimeout > HEARTBEAT_TIMEOUT_MS && !window.__CONVERT_ACTIVE && !window.__BOOSTER_ACTIVE && canRefreshNow()) {
-                log("Heartbeat timeout. Refreshing page...");
-                setTimeout(() => {
-                    window.location.reload();
-                }, 2000);
-            }
-        }, SOCKET_CHECK_MS);
-    }
+    // Passive socket observer — we never reload the page or touch the socket.
+    // case-clicker.com owns the socket and will reconnect on its own. This function
+    // is intentionally a no-op kept for API compatibility with older versions.
+    function startSocketMonitoring() { /* disabled; see onHeartbeatFailure for CC Hub link recovery */ }
 
     // --- NEXT.JS IMAGE FETCH ---
     async function fetchPublicProfileImage(userId) {
@@ -823,19 +881,35 @@
 
     // --- HEARTBEAT ---
     async function heartbeat(baseUrl) {
-        if (heartbeatInFlight) return;
+        if (baseUrl !== activeBaseUrl) return;
+        if (heartbeatInFlight) { scheduleHeartbeat(2000); return; }
         heartbeatInFlight = true;
+
+        // Watchdog: if the callback never fires, force-retry rather than hang.
+        const watchdog = setTimeout(() => {
+            if (!heartbeatInFlight) return;
+            heartbeatInFlight = false;
+            if (baseUrl === activeBaseUrl) onHeartbeatFailure('watchdog');
+        }, HEARTBEAT_REQUEST_TIMEOUT_MS + 5000);
+
+        const fail = (reason) => {
+            clearTimeout(watchdog);
+            heartbeatInFlight = false;
+            if (baseUrl !== activeBaseUrl) return;
+            onHeartbeatFailure(reason);
+        };
+
         let me = { _id: null, name: "Ukjent" };
         try {
             const tokenRes = await fetch('/api/auth/token');
-            if(tokenRes.status !== 200) { heartbeatInFlight = false; return; }
+            if (tokenRes.status !== 200) return fail('auth/token ' + tokenRes.status);
             const json = await tokenRes.json();
             const jwt = parseJwt(json.token);
-            if(jwt) { me._id = jwt.id || jwt.sub; me.name = jwt.name; }
-            if(!me._id) { heartbeatInFlight = false; return; }
+            if (jwt) { me._id = jwt.id || jwt.sub; me.name = jwt.name; }
+            if (!me._id) return fail('no jwt id');
 
             const statsRes = await fetch('/api/me');
-            if(statsRes.status !== 200) { heartbeatInFlight = false; return; }
+            if (statsRes.status !== 200) return fail('me ' + statsRes.status);
             const fullStats = await statsRes.json();
             if (!cachedProfileMeta) cachedProfileMeta = await fetchPublicProfileImage(me._id);
             if (!cachedProfileImage && cachedProfileMeta?.image) cachedProfileImage = cachedProfileMeta.image;
@@ -858,78 +932,25 @@
             };
 
             gmRequest({
-                method: "POST", url: `${baseUrl}/api/heartbeat`,
+                method: "POST",
+                url: `${baseUrl}/api/heartbeat`,
                 headers: { "Content-Type": "application/json" },
                 data: JSON.stringify(payload),
+                timeout: HEARTBEAT_REQUEST_TIMEOUT_MS,
                 onload: (res) => {
+                    clearTimeout(watchdog);
                     heartbeatInFlight = false;
-                    if(res.status !== 200) {
-                        totalErrors++;
-                        isConnected = false;
-                        consecutiveHeartbeatFailures++;
-                        setConnState(false);
-                        if (consecutiveHeartbeatFailures >= HEARTBEAT_FAILURES_BEFORE_STOP) {
-                            if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
-                            log("Link unreachable. Change URL above and click CONNECT.");
-                            return;
-                        }
-                        log("Heartbeat failed (" + consecutiveHeartbeatFailures + "/" + HEARTBEAT_FAILURES_BEFORE_STOP + ")");
-                        return;
-                    }
-                    consecutiveHeartbeatFailures = 0;
-                    isConnected = true;
-                    setConnState(true);
-                    lastHeartbeatSuccess = Date.now();
-                    consecutiveSocketFailures = 0;
-                    const json = JSON.parse(res.responseText);
-                    if(json.commands && json.commands.length > 0) {
-                        json.commands.forEach(cmd => {
-                            // Check for refresh command from backend
-                            // Don't refresh if we're in the middle of a convert job
-                            if(cmd.type === 'refresh_page') {
-                                if(window.__CONVERT_ACTIVE || window.__BOOSTER_ACTIVE) {
-                                    log("Skipping refresh - convert job in progress");
-                                    return;
-                                }
-                                const grace = Date.now() - connectedSince;
-                                if (grace < REFRESH_GRACE_MS) {
-                                    log("Skipping refresh - connected recently (" + Math.round(grace/1000) + "s ago)");
-                                    return;
-                                }
-                                log("Received refresh command. Refreshing...");
-                                setTimeout(() => window.location.reload(), 1000);
-                                return;
-                            }
-                            executeCommand(cmd, me, baseUrl);
-                        });
-                    }
+                    if (baseUrl !== activeBaseUrl) return;
+                    if (res.status !== 200) { onHeartbeatFailure('http ' + res.status); return; }
+                    onHeartbeatSuccess(res, me);
                 },
-                onerror: () => {
-                    heartbeatInFlight = false;
-                    totalErrors++;
-                    isConnected = false;
-                    consecutiveHeartbeatFailures++;
-                    setConnState(false);
-                    if (consecutiveHeartbeatFailures >= HEARTBEAT_FAILURES_BEFORE_STOP) {
-                        if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
-                        log("Link unreachable. Change URL above and click CONNECT.");
-                        return;
-                    }
-                    log("Heartbeat error (" + consecutiveHeartbeatFailures + "/" + HEARTBEAT_FAILURES_BEFORE_STOP + ")");
-                }
+                onerror: () => fail('network'),
+                ontimeout: () => fail('timeout'),
+                onabort: () => fail('abort'),
             });
-        } catch(e) { 
+        } catch (e) {
             console.error(e);
-            heartbeatInFlight = false;
-            consecutiveHeartbeatFailures++;
-            isConnected = false;
-            setConnState(false);
-            if (consecutiveHeartbeatFailures >= HEARTBEAT_FAILURES_BEFORE_STOP) {
-                if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
-                log("Link unreachable. Change URL above and click CONNECT.");
-                return;
-            }
-            log("Heartbeat exception (" + consecutiveHeartbeatFailures + "/" + HEARTBEAT_FAILURES_BEFORE_STOP + ")");
+            fail('exception: ' + (e?.message || e));
         }
     }
 

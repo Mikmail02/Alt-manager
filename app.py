@@ -700,20 +700,27 @@ HTML_UI = """
     <style>
       html, body { height: 100% !important; margin: 0 !important; }
       body { flex-direction: column !important; }
+      /* Outer shell — root contains resize grips + app chrome */
+      .cc-shell {
+        position: relative; flex: 1 1 auto; display: flex; flex-direction: column;
+        min-height: 0;
+      }
+      /* Native drag via pywebview attribute (data-pywebview-drag-region) */
       .cc-titlebar {
         display: flex; align-items: stretch; height: 32px;
         background: #000; border-bottom: 1px solid #27272a;
         color: #a1a1aa; font-family: 'Inter', sans-serif;
         font-size: 12px; font-weight: 600; user-select: none;
-        -webkit-app-region: drag; flex: 0 0 auto; z-index: 10000;
+        flex: 0 0 auto; z-index: 50;
       }
       .cc-titlebar-title {
         display: flex; align-items: center; padding: 0 14px; letter-spacing: 0.2px;
+        flex: 0 0 auto;
       }
       .cc-titlebar-title b { color: #10b981; margin-right: 6px; }
-      .cc-titlebar-spacer { flex: 1 1 auto; }
+      .cc-titlebar-spacer { flex: 1 1 auto; min-width: 0; }
       .cc-titlebar-buttons {
-        display: flex; -webkit-app-region: no-drag;
+        display: flex; flex: 0 0 auto;
       }
       .cc-titlebar-btn {
         width: 46px; height: 32px; border: 0; background: transparent;
@@ -726,11 +733,149 @@ HTML_UI = """
       .cc-app-body {
         flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden;
       }
+
+      /* Edge resize grips — thin invisible zones around the shell.
+         Use pointer-events + setPointerCapture from JS. */
+      .cc-grip { position: absolute; z-index: 60; background: transparent; }
+      .cc-grip-n { top: 0; left: 6px; right: 6px; height: 4px; cursor: n-resize; }
+      .cc-grip-s { bottom: 0; left: 6px; right: 6px; height: 4px; cursor: s-resize; }
+      .cc-grip-w { top: 6px; bottom: 6px; left: 0; width: 4px; cursor: w-resize; }
+      .cc-grip-e { top: 6px; bottom: 6px; right: 0; width: 4px; cursor: e-resize; }
+      .cc-grip-nw { top: 0; left: 0; width: 8px; height: 8px; cursor: nw-resize; }
+      .cc-grip-ne { top: 0; right: 0; width: 8px; height: 8px; cursor: ne-resize; }
+      .cc-grip-sw { bottom: 0; left: 0; width: 8px; height: 8px; cursor: sw-resize; }
+      .cc-grip-se { bottom: 0; right: 0; width: 8px; height: 8px; cursor: se-resize; }
     </style>
     <script>
       function cchubMinimize() { window.pywebview && window.pywebview.api.minimize(); }
       function cchubToggleMax() { window.pywebview && window.pywebview.api.toggle_maximize(); }
       function cchubClose() { window.pywebview && window.pywebview.api.hide_to_tray(); }
+
+      // Titlebar drag fallback — the `data-pywebview-drag-region` attribute is
+      // honored by modern pywebview on Windows; if that fires the OS-native drag,
+      // DOM mousemove stops firing and this fallback stays idle. If the attribute
+      // is ignored, our own listener moves the window manually.
+      (function installDragFallback() {
+        window.addEventListener('DOMContentLoaded', () => {
+          const bar = document.querySelector('.cc-titlebar');
+          if (!bar) return;
+          const DRAG_THRESHOLD = 3;
+          let tracking = false;
+          let armed = false;
+          let startScreenX = 0, startScreenY = 0;
+          let startWinX = 0, startWinY = 0;
+          let lastSent = 0;
+
+          bar.addEventListener('mousedown', async (e) => {
+            if (e.button !== 0) return;
+            if (e.target.closest('[data-no-drag]')) return;
+            if (!window.pywebview || !window.pywebview.api) return;
+            try {
+              const rect = await window.pywebview.api.get_rect();
+              if (!rect) return;
+              startWinX = rect.x; startWinY = rect.y;
+              startScreenX = e.screenX; startScreenY = e.screenY;
+              armed = true; tracking = false;
+            } catch (_) {}
+          });
+          bar.addEventListener('dblclick', (e) => {
+            if (e.target.closest('[data-no-drag]')) return;
+            cchubToggleMax();
+          });
+          bar.addEventListener('mousemove', (e) => {
+            if (!armed) return;
+            const dx = e.screenX - startScreenX;
+            const dy = e.screenY - startScreenY;
+            if (!tracking) {
+              if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+              tracking = true;
+            }
+            const now = performance.now();
+            if (now - lastSent < 12) return;
+            lastSent = now;
+            window.pywebview.api.move_window(startWinX + dx, startWinY + dy);
+          });
+          const endDrag = () => { armed = false; tracking = false; };
+          bar.addEventListener('mouseup', endDrag);
+          bar.addEventListener('mouseleave', endDrag);
+          window.addEventListener('blur', endDrag);
+        });
+      })();
+
+      // Edge + corner resize — pointer capture keeps events alive even when the
+      // cursor leaves the shrinking window.
+      (function installResizeGrips() {
+        window.addEventListener('DOMContentLoaded', () => {
+          const MIN_W = 780, MIN_H = 520;
+          const grips = [
+            { sel: '.cc-grip-n',  edges: ['n'] },
+            { sel: '.cc-grip-s',  edges: ['s'] },
+            { sel: '.cc-grip-w',  edges: ['w'] },
+            { sel: '.cc-grip-e',  edges: ['e'] },
+            { sel: '.cc-grip-nw', edges: ['n','w'] },
+            { sel: '.cc-grip-ne', edges: ['n','e'] },
+            { sel: '.cc-grip-sw', edges: ['s','w'] },
+            { sel: '.cc-grip-se', edges: ['s','e'] },
+          ];
+          grips.forEach(({ sel, edges }) => {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            el.addEventListener('pointerdown', async (e) => {
+              if (e.button !== 0) return;
+              if (!window.pywebview || !window.pywebview.api) return;
+              const rect = await window.pywebview.api.get_rect();
+              if (!rect) return;
+              const start = {
+                sx: e.screenX, sy: e.screenY,
+                x: rect.x, y: rect.y, w: rect.w, h: rect.h,
+              };
+              let raf = 0, pending = null;
+              const flush = () => {
+                raf = 0;
+                if (!pending) return;
+                const p = pending; pending = null;
+                if (edges.includes('n') || edges.includes('w')) {
+                  window.pywebview.api.move_and_resize(p.x, p.y, p.w, p.h);
+                } else {
+                  window.pywebview.api.resize_window(p.w, p.h);
+                }
+              };
+              const onMove = (ev) => {
+                const dx = ev.screenX - start.sx;
+                const dy = ev.screenY - start.sy;
+                let x = start.x, y = start.y, w = start.w, h = start.h;
+                if (edges.includes('e')) w = Math.max(MIN_W, start.w + dx);
+                if (edges.includes('s')) h = Math.max(MIN_H, start.h + dy);
+                if (edges.includes('w')) {
+                  const newW = Math.max(MIN_W, start.w - dx);
+                  x = start.x + (start.w - newW);
+                  w = newW;
+                }
+                if (edges.includes('n')) {
+                  const newH = Math.max(MIN_H, start.h - dy);
+                  y = start.y + (start.h - newH);
+                  h = newH;
+                }
+                pending = { x, y, w, h };
+                if (!raf) raf = requestAnimationFrame(flush);
+              };
+              const onUp = () => {
+                el.removeEventListener('pointermove', onMove);
+                el.removeEventListener('pointerup', onUp);
+                el.removeEventListener('pointercancel', onUp);
+                try { el.releasePointerCapture(e.pointerId); } catch(_) {}
+                if (raf) { cancelAnimationFrame(raf); raf = 0; }
+                if (pending) flush();
+              };
+              try { el.setPointerCapture(e.pointerId); } catch(_) {}
+              el.addEventListener('pointermove', onMove);
+              el.addEventListener('pointerup', onUp);
+              el.addEventListener('pointercancel', onUp);
+              e.preventDefault();
+            });
+          });
+        });
+      })();
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
@@ -746,11 +891,19 @@ HTML_UI = """
         }
         
         body { background: var(--bg-dark); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
-        
+
         #nprogress .bar { background: var(--accent); position: fixed; z-index: 9999; top: 0; left: 0; width: 0%; height: 2px; transition: width 0.2s ease; box-shadow: 0 0 10px var(--accent); }
-        
+
         /* SIDEBAR */
-        .sidebar { width: 320px; background: #000; border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 0; z-index: 10; user-select: none; }
+        .sidebar { width: 320px; flex: 0 0 320px; background: #000; border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 0; z-index: 10; user-select: none; transition: flex-basis .15s ease, width .15s ease; }
+        @media (max-width: 1120px) {
+            .sidebar { width: 260px; flex-basis: 260px; }
+        }
+        @media (max-width: 900px) {
+            .sidebar { width: 220px; flex-basis: 220px; }
+            .brand { padding: 0 14px 16px 14px; font-size: 14px; }
+            .settings-area { padding: 14px; }
+        }
         .brand { padding: 0 24px 20px 24px; font-weight: 800; font-size: 16px; letter-spacing: -0.5px; color: #fff; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); margin-bottom: 10px; cursor: pointer; }
         .brand-title span { color: var(--accent); }
         
@@ -805,42 +958,62 @@ HTML_UI = """
         
         /* GLOBAL HEADER */
         .global-header {
-            height: 50px;
+            flex: 0 0 auto;
+            min-height: 50px;
             background: rgba(24, 24, 27, 0.8);
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
-            justify-content: space-around;
-            padding: 0 20px;
+            gap: 14px;
+            padding: 8px 16px;
             backdrop-filter: blur(10px);
             position: relative;
+            z-index: 20;
         }
-        .gh-item { display: flex; flex-direction: column; align-items: center; }
-        .gh-label { font-size: 9px; color: #666; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-        .gh-val { font-size: 13px; color: #fff; font-family: 'JetBrains Mono'; font-weight: 600; }
+        .gh-stats {
+            display: flex;
+            flex: 1 1 auto;
+            min-width: 0;
+            gap: 20px;
+            align-items: center;
+            justify-content: space-around;
+            overflow: hidden;
+        }
+        .gh-item {
+            display: flex; flex-direction: column; align-items: center;
+            min-width: 0;
+        }
+        .gh-label {
+            font-size: 9px; color: #666; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        .gh-val {
+            font-size: 13px; color: #fff; font-family: 'JetBrains Mono';
+            font-weight: 600; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+        }
         .gh-val.tok { color: #eab308; }
         .gh-val.mon { color: var(--accent); }
 
-        /* ACTIVE JOBS BUTTON */
+        /* ACTIVE JOBS BUTTON — now a regular flex child, no absolute positioning. */
+        .active-jobs-wrap { position: relative; flex: 0 0 auto; }
         .active-jobs-btn {
-            position: absolute;
-            right: 20px;
-            top: 50%;
-            transform: translateY(-50%);
             background: var(--accent);
             color: #000;
             border: none;
-            padding: 8px 16px;
+            padding: 8px 14px;
             border-radius: 6px;
             font-weight: 700;
             font-size: 11px;
             cursor: pointer;
-            transition: 0.2s;
+            transition: background .15s, transform .15s;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+            white-space: nowrap;
         }
-        .active-jobs-btn:hover { background: #0ea5e9; transform: translateY(-50%) scale(1.05); }
+        .active-jobs-btn:hover { background: #0ea5e9; transform: scale(1.03); }
         .active-jobs-btn .badge {
             background: rgba(0,0,0,0.3);
             border-radius: 10px;
@@ -849,14 +1022,37 @@ HTML_UI = """
             min-width: 18px;
             text-align: center;
         }
-        
-        /* ACTIVE JOBS DROPDOWN */
+        .active-jobs-btn .badge:empty,
+        .active-jobs-btn .badge[data-zero="1"] { display: none; }
+        .active-jobs-btn-label { display: inline; }
+
+        /* Compact the stats when width gets tight. */
+        @media (max-width: 1120px) {
+            .gh-stats { gap: 14px; }
+            .gh-val { font-size: 12px; }
+            .gh-label { font-size: 8px; }
+        }
+        @media (max-width: 960px) {
+            .global-header { padding: 6px 12px; gap: 10px; }
+            .gh-stats { gap: 10px; }
+            .gh-label { display: none; }
+            .gh-item::before {
+                content: attr(data-short);
+                font-size: 8px; color: #555; font-weight: 800;
+                text-transform: uppercase; margin-right: 4px;
+            }
+            .gh-item { flex-direction: row; align-items: baseline; gap: 4px; }
+            .active-jobs-btn-label { display: none; }
+            .active-jobs-btn { padding: 8px 10px; }
+        }
+
+        /* ACTIVE JOBS DROPDOWN — anchored to button so it moves with the header. */
         .active-jobs-dropdown {
-            position: fixed;
-            right: 20px;
-            top: 120px;
-            width: 500px;
-            max-height: 600px;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: min(500px, calc(100vw - 40px));
+            max-height: calc(100vh - 140px);
             background: var(--bg-panel);
             border: 1px solid var(--border);
             border-radius: 12px;
@@ -954,19 +1150,33 @@ HTML_UI = """
             margin-top: 6px;
         }
 
-        .top-bar { height: 70px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 40px; background: rgba(9,9,11,0.5); backdrop-filter: blur(20px); z-index: 10; }
-        .user-head { display: flex; align-items: center; gap: 15px; }
-        .uh-avatar { width: 42px; height: 42px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; }
-        .uh-meta h1 { font-size: 16px; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 10px; }
+        .top-bar { min-height: 70px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 8px 24px; background: rgba(9,9,11,0.5); backdrop-filter: blur(20px); z-index: 10; gap: 16px; flex-wrap: wrap; }
+        .user-head { display: flex; align-items: center; gap: 15px; min-width: 0; }
+        .uh-avatar { width: 42px; height: 42px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; flex-shrink: 0; }
+        .uh-meta { min-width: 0; }
+        .uh-meta h1 { font-size: 16px; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .uh-meta p { font-size: 11px; color: var(--text-muted); margin: 2px 0 0 0; font-family: 'JetBrains Mono'; }
-        
-        .tabs { display: flex; gap: 20px; height: 100%; }
-        .tab { height: 100%; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: 0.2s; box-sizing: border-box; }
+
+        .tabs { display: flex; gap: 20px; height: 100%; flex-wrap: wrap; align-items: center; }
+        .tab { height: 42px; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: 0.2s; box-sizing: border-box; white-space: nowrap; }
         .tab:hover { color: #fff; }
         .tab.active { color: #fff; border-bottom-color: var(--accent); }
 
-        .content { flex: 1; padding: 40px; overflow-y: auto; display: none; }
+        @media (max-width: 1120px) {
+            .tabs { gap: 14px; }
+            .tab { font-size: 12px; }
+        }
+        @media (max-width: 900px) {
+            .top-bar { padding: 8px 14px; gap: 10px; }
+            .tabs { gap: 10px; width: 100%; order: 3; overflow-x: auto; }
+            .tabs::-webkit-scrollbar { height: 4px; }
+            .tabs::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+        }
+
+        .content { flex: 1; padding: 32px; overflow-y: auto; display: none; }
         .content.active { display: block; animation: fadein 0.3s; }
+        @media (max-width: 1120px) { .content { padding: 22px; } }
+        @media (max-width: 900px) { .content { padding: 14px; } }
         @keyframes fadein { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse {
             0% { transform: translateX(-40%); opacity: 0.75; }
@@ -995,7 +1205,8 @@ HTML_UI = """
         .ov-stat { display: flex; align-items: center; gap: 4px; }
 
         /* USER DASHBOARD */
-        .dash-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
+        .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 24px; }
+        @media (max-width: 900px) { .dash-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; } }
         .stat-box { background: var(--bg-panel); border: 1px solid var(--border); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
         .sb-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
         .sb-val { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; }
@@ -1059,13 +1270,23 @@ HTML_UI = """
 </head>
 <body>
 
-<div class="cc-titlebar">
-  <div class="cc-titlebar-title"><b>CC</b> Case Clicker Hub</div>
-  <div class="cc-titlebar-spacer"></div>
-  <div class="cc-titlebar-buttons">
-    <button class="cc-titlebar-btn" title="Minimer" onclick="cchubMinimize()">&#xE921;</button>
-    <button class="cc-titlebar-btn" title="Maksimer" onclick="cchubToggleMax()">&#xE922;</button>
-    <button class="cc-titlebar-btn cc-close" title="Lukk til tray" onclick="cchubClose()">&#xE8BB;</button>
+<!-- Resize grips (frameless window) -->
+<div class="cc-grip cc-grip-n"></div>
+<div class="cc-grip cc-grip-s"></div>
+<div class="cc-grip cc-grip-w"></div>
+<div class="cc-grip cc-grip-e"></div>
+<div class="cc-grip cc-grip-nw"></div>
+<div class="cc-grip cc-grip-ne"></div>
+<div class="cc-grip cc-grip-sw"></div>
+<div class="cc-grip cc-grip-se"></div>
+
+<div class="cc-titlebar" data-pywebview-drag-region>
+  <div class="cc-titlebar-title" data-pywebview-drag-region><b>CC</b> Case Clicker Hub</div>
+  <div class="cc-titlebar-spacer" data-pywebview-drag-region></div>
+  <div class="cc-titlebar-buttons" data-no-drag>
+    <button class="cc-titlebar-btn" data-no-drag title="Minimer" onclick="cchubMinimize()">&#xE921;</button>
+    <button class="cc-titlebar-btn" data-no-drag title="Maksimer" onclick="cchubToggleMax()">&#xE922;</button>
+    <button class="cc-titlebar-btn cc-close" data-no-drag title="Lukk til tray" onclick="cchubClose()">&#xE8BB;</button>
   </div>
 </div>
 <div class="cc-app-body">
@@ -1088,21 +1309,25 @@ HTML_UI = """
 <div class="main">
     <!-- GLOBAL HEADER -->
     <div class="global-header">
-        <div class="gh-item"><div class="gh-label">Total Users</div><div class="gh-val" id="ghUsers">0</div></div>
-        <div class="gh-item"><div class="gh-label">Total Money</div><div class="gh-val mon" id="ghMoney">$0</div></div>
-        <div class="gh-item"><div class="gh-label">Total Tokens</div><div class="gh-val tok" id="ghTokens">0</div></div>
-        <div class="gh-item"><div class="gh-label">Networth</div><div class="gh-val" id="ghNet">0</div></div>
-        <button class="active-jobs-btn" onclick="toggleActiveJobs()">
-            Active Jobs
-            <span class="badge" id="activeJobsBadge">0</span>
-            <span class="badge" id="activeJobsAlertBadge" style="background:#ef4444; color:#fff;">0</span>
-        </button>
-        <div class="active-jobs-dropdown" id="activeJobsDropdown">
-            <div class="active-jobs-header">
-                <h3>Active Jobs</h3>
-                <button onclick="toggleActiveJobs()" style="background:transparent; border:none; color:#666; cursor:pointer; font-size:18px;">×</button>
+        <div class="gh-stats">
+            <div class="gh-item" data-short="U"><div class="gh-label">Total Users</div><div class="gh-val" id="ghUsers">0</div></div>
+            <div class="gh-item" data-short="$"><div class="gh-label">Total Money</div><div class="gh-val mon" id="ghMoney">$0</div></div>
+            <div class="gh-item" data-short="T"><div class="gh-label">Total Tokens</div><div class="gh-val tok" id="ghTokens">0</div></div>
+            <div class="gh-item" data-short="NW"><div class="gh-label">Networth</div><div class="gh-val" id="ghNet">0</div></div>
+        </div>
+        <div class="active-jobs-wrap">
+            <button class="active-jobs-btn" onclick="toggleActiveJobs()" title="Active Jobs">
+                <span class="active-jobs-btn-label">Active Jobs</span>
+                <span class="badge" id="activeJobsBadge" data-zero="1">0</span>
+                <span class="badge" id="activeJobsAlertBadge" data-zero="1" style="background:#ef4444; color:#fff;">0</span>
+            </button>
+            <div class="active-jobs-dropdown" id="activeJobsDropdown">
+                <div class="active-jobs-header">
+                    <h3>Active Jobs</h3>
+                    <button onclick="toggleActiveJobs()" style="background:transparent; border:none; color:#666; cursor:pointer; font-size:18px;">×</button>
+                </div>
+                <div class="active-jobs-list" id="activeJobsList"></div>
             </div>
-            <div class="active-jobs-list" id="activeJobsList"></div>
         </div>
     </div>
 

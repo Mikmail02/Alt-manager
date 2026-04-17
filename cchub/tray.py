@@ -25,6 +25,9 @@ _window: Optional[webview.Window] = None
 _icon: Optional[pystray.Icon] = None
 _is_maximized = False
 
+_MIN_W = 780
+_MIN_H = 520
+
 
 class _WindowApi:
     """Methods exposed to the frontend as window.pywebview.api.*"""
@@ -50,11 +53,77 @@ class _WindowApi:
         except Exception as exc:
             _log.debug("toggle_maximize failed: %s", exc)
 
+    def is_maximized(self) -> bool:
+        return bool(_is_maximized)
+
     def hide_to_tray(self) -> None:
         _hide_window()
 
     def quit(self) -> None:
         _quit_app()
+
+    def get_rect(self):
+        if _window is None:
+            return {"x": 0, "y": 0, "w": 0, "h": 0}
+        try:
+            return {
+                "x": int(_window.x),
+                "y": int(_window.y),
+                "w": int(_window.width),
+                "h": int(_window.height),
+            }
+        except Exception:
+            return {"x": 0, "y": 0, "w": 0, "h": 0}
+
+    def start_drag(self) -> None:
+        """Native title-bar drag (fallback when data-pywebview-drag-region is unavailable)."""
+        if _window is None:
+            return
+        try:
+            # pywebview >= 5 exposes this helper on Windows.
+            move = getattr(_window, "move_start", None)
+            if callable(move):
+                move()
+        except Exception as exc:
+            _log.debug("start_drag failed: %s", exc)
+
+    def resize_window(self, w, h) -> None:
+        """Resize to an absolute width/height. Clamped to min size."""
+        global _is_maximized
+        if _window is None:
+            return
+        try:
+            w = max(_MIN_W, int(w))
+            h = max(_MIN_H, int(h))
+            _window.resize(w, h)
+            _is_maximized = False
+        except Exception as exc:
+            _log.debug("resize_window failed: %s", exc)
+
+    def move_window(self, x, y) -> None:
+        """Move window to an absolute screen position."""
+        global _is_maximized
+        if _window is None:
+            return
+        try:
+            _window.move(int(x), int(y))
+            _is_maximized = False
+        except Exception as exc:
+            _log.debug("move_window failed: %s", exc)
+
+    def move_and_resize(self, x, y, w, h) -> None:
+        """Combined move + resize for left/top edge drags (single call = less flicker)."""
+        global _is_maximized
+        if _window is None:
+            return
+        try:
+            w = max(_MIN_W, int(w))
+            h = max(_MIN_H, int(h))
+            _window.resize(w, h)
+            _window.move(int(x), int(y))
+            _is_maximized = False
+        except Exception as exc:
+            _log.debug("move_and_resize failed: %s", exc)
 
 
 def _load_icon_image() -> Image.Image:
@@ -276,9 +345,9 @@ def main() -> int:
     _window = webview.create_window(
         title=f"{APP_NAME} {__version__}",
         url="https://127.0.0.1:5000/",
-        width=1400,
-        height=900,
-        min_size=(1000, 640),
+        width=1280,
+        height=820,
+        min_size=(_MIN_W, _MIN_H),
         resizable=True,
         confirm_close=False,
         frameless=True,
