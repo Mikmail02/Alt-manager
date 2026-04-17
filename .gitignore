@@ -20,6 +20,8 @@ installer/Output/
 
 # Tools
 ngrok.exe
+.ngrok.exe.old
+*.old
 
 # OS / editor
 .DS_Store
