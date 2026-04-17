@@ -11,7 +11,9 @@ from cchub import auth, config as app_config, paths
 from cchub.version import __version__
 
 PORT = 5000
-HOST = "127.0.0.1"
+# Bind on all interfaces so Tailscale/LAN workers can reach the hub.
+# TLS + X-Alt-Token header guard all /api routes.
+HOST = "0.0.0.0"
 
 paths.ensure_dirs()
 paths.migrate_legacy_data(paths.RESOURCE_DIR)
@@ -32,10 +34,12 @@ def api_ping():
 
 @app.route("/config")
 def panel_config():
+    public = app_config.public_url()
+    base = public if public else f"https://127.0.0.1:{PORT}"
     return jsonify({
         "token": app_config.token(),
         "version": __version__,
-        "base_url": f"https://{HOST}:{PORT}",
+        "base_url": base,
     })
 
 def load_db():
@@ -916,7 +920,7 @@ HTML_UI = """
         /* LIST ITEM & STATUS COLORS */
         .acc-item { padding: 12px; margin-bottom: 6px; border-radius: 8px; cursor: pointer; display: flex; gap: 12px; transition: 0.15s; border: 1px solid transparent; background: #09090b; position: relative; }
         
-        /* Bakgrunnsfarger basert på status */
+        /* Background colors based on status */
         .bg-online { background: rgba(16, 185, 129, 0.08) !important; border-color: rgba(16, 185, 129, 0.2) !important; }
         .bg-offline { background: rgba(239, 68, 68, 0.08) !important; border-color: rgba(239, 68, 68, 0.2) !important; }
 
@@ -1286,7 +1290,7 @@ HTML_UI = """
   <div class="cc-titlebar-buttons" data-no-drag>
     <button class="cc-titlebar-btn" data-no-drag title="Minimer" onclick="cchubMinimize()">&#xE921;</button>
     <button class="cc-titlebar-btn" data-no-drag title="Maksimer" onclick="cchubToggleMax()">&#xE922;</button>
-    <button class="cc-titlebar-btn cc-close" data-no-drag title="Lukk til tray" onclick="cchubClose()">&#xE8BB;</button>
+    <button class="cc-titlebar-btn cc-close" data-no-drag title="Close to tray" onclick="cchubClose()">&#xE8BB;</button>
   </div>
 </div>
 <div class="cc-app-body">
@@ -1663,7 +1667,7 @@ HTML_UI = """
                 if ((Date.now()/1000 - vaultTime) > 180) isOnline = false;
             }
             
-            // Fargelegg basert på status
+            // Color based on status
             let statusClass = isOnline ? 'bg-online' : 'bg-offline';
             let statusText = isOnline ? 'Online' : 'Offline';
             let statusTextColor = isOnline ? 'var(--accent)' : '#ef4444';
@@ -2567,9 +2571,13 @@ HTML_UI = """
 """
 
 def run_server(host: str = HOST, port: int = PORT) -> None:
-    from cchub import cert_manager
+    from cchub import cert_manager, network
 
-    cert_path, key_path = cert_manager.ensure_certs()
+    extra = list(app_config.extra_cert_hosts())
+    detected = network.detect_tailscale_ip()
+    if detected and detected not in extra:
+        extra.append(detected)
+    cert_path, key_path = cert_manager.ensure_certs(tuple(extra))
     cert_manager.install_ca_to_windows_store()
     print(f"--- Case Clicker Hub {__version__} listening on https://{host}:{port} ---")
     app.run(

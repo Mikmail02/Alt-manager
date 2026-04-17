@@ -11,6 +11,8 @@ def _default() -> Dict[str, Any]:
         "api_token": secrets.token_urlsafe(32),
         "auto_start": False,
         "first_run_completed": False,
+        "public_url": "",
+        "extra_cert_hosts": [],
     }
 
 
@@ -44,3 +46,23 @@ def save(data: Dict[str, Any]) -> None:
 
 def token() -> str:
     return load()["api_token"]
+
+
+def public_url() -> str:
+    return load().get("public_url", "") or ""
+
+
+def extra_cert_hosts() -> list:
+    return load().get("extra_cert_hosts", []) or []
+
+
+def set_public_url(url: str) -> None:
+    data = load()
+    data["public_url"] = (url or "").strip().rstrip("/")
+    save(data)
+
+
+def set_extra_cert_hosts(hosts: list) -> None:
+    data = load()
+    data["extra_cert_hosts"] = list(dict.fromkeys(h.strip() for h in hosts if h and h.strip()))
+    save(data)

@@ -87,6 +87,36 @@ def is_update_required(release: Optional[ReleaseInfo]) -> bool:
     return release.version > current_version()
 
 
+def fetch_commits_between(old_tag: str, new_tag: str, timeout: float = 10.0) -> list:
+    """Return commit subjects (first line only) between two tags, oldest first."""
+    url = (
+        f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
+        f"/compare/{old_tag}...{new_tag}"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": f"CCHub/{__version__}",
+        },
+    )
+    try:
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return []
+    subjects = []
+    for entry in payload.get("commits") or []:
+        msg = ((entry.get("commit") or {}).get("message") or "").strip()
+        if not msg:
+            continue
+        first = msg.splitlines()[0].strip()
+        if first:
+            subjects.append(first)
+    return subjects
+
+
 def download_installer(release: ReleaseInfo) -> Optional[Path]:
     if not release.installer_url:
         return None

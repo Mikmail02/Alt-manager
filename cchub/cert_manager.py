@@ -67,17 +67,43 @@ def _generate_ca() -> Tuple[rsa.RSAPrivateKey, x509.Certificate]:
     return key, cert
 
 
+def _build_san_list(extra_hosts: Tuple[str, ...] = ()) -> list:
+    entries = [
+        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+        x509.IPAddress(ipaddress.IPv6Address("::1")),
+        x509.DNSName("localhost"),
+    ]
+    seen_ips: set = {"127.0.0.1", "::1"}
+    seen_dns: set = {"localhost"}
+    for host in extra_hosts:
+        host = (host or "").strip()
+        if not host:
+            continue
+        try:
+            ip = ipaddress.ip_address(host)
+            key = str(ip)
+            if key in seen_ips:
+                continue
+            entries.append(x509.IPAddress(ip))
+            seen_ips.add(key)
+        except ValueError:
+            key = host.lower()
+            if key in seen_dns:
+                continue
+            entries.append(x509.DNSName(host))
+            seen_dns.add(key)
+    return entries
+
+
 def _generate_server_cert(
-    ca_key: rsa.RSAPrivateKey, ca_cert: x509.Certificate
+    ca_key: rsa.RSAPrivateKey,
+    ca_cert: x509.Certificate,
+    extra_hosts: Tuple[str, ...] = (),
 ) -> Tuple[rsa.RSAPrivateKey, x509.Certificate]:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = dt.datetime.now(dt.timezone.utc)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
-    san = x509.SubjectAlternativeName([
-        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-        x509.IPAddress(ipaddress.IPv6Address("::1")),
-        x509.DNSName("localhost"),
-    ])
+    san = x509.SubjectAlternativeName(_build_san_list(extra_hosts))
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -97,8 +123,35 @@ def _generate_server_cert(
     return key, cert
 
 
-def ensure_certs() -> Tuple[Path, Path]:
-    """Generate CA + server cert if missing. Returns (cert_path, key_path)."""
+def _cert_san_set(cert: x509.Certificate) -> set:
+    try:
+        ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        return set()
+    out: set = set()
+    for ip in ext.get_values_for_type(x509.IPAddress):
+        out.add(str(ip))
+    for dns in ext.get_values_for_type(x509.DNSName):
+        out.add(dns.lower())
+    return out
+
+
+def _expected_san_set(extra_hosts: Tuple[str, ...]) -> set:
+    out: set = {"127.0.0.1", "::1", "localhost"}
+    for host in extra_hosts:
+        host = (host or "").strip()
+        if not host:
+            continue
+        try:
+            out.add(str(ipaddress.ip_address(host)))
+        except ValueError:
+            out.add(host.lower())
+    return out
+
+
+def ensure_certs(extra_hosts: Tuple[str, ...] = ()) -> Tuple[Path, Path]:
+    """Generate CA + server cert if missing. Regenerate server cert when SANs change.
+    Returns (cert_path, key_path)."""
     paths.ensure_dirs()
     cert_dir = paths.CERT_DIR
     ca_key_path = cert_dir / CA_KEY
@@ -121,8 +174,18 @@ def ensure_certs() -> Tuple[Path, Path]:
         ca_key = serialization.load_pem_private_key(ca_key_path.read_bytes(), password=None)
         ca_cert = x509.load_pem_x509_certificate(ca_cert_path.read_bytes())
 
-    if not server_key_path.exists() or not server_cert_path.exists():
-        server_key, server_cert = _generate_server_cert(ca_key, ca_cert)
+    expected = _expected_san_set(extra_hosts)
+    regenerate = not server_key_path.exists() or not server_cert_path.exists()
+    if not regenerate:
+        try:
+            existing = x509.load_pem_x509_certificate(server_cert_path.read_bytes())
+            if not expected.issubset(_cert_san_set(existing)):
+                regenerate = True
+        except (OSError, ValueError):
+            regenerate = True
+
+    if regenerate:
+        server_key, server_cert = _generate_server_cert(ca_key, ca_cert, extra_hosts)
         _write_pem(
             server_key_path,
             server_key.private_bytes(
