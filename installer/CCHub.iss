@@ -4,7 +4,7 @@
 
 #define AppName "Case Clicker Hub"
 #define AppShort "CCHub"
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.3"
 #define AppPublisher "Mikmail"
 #define AppURL "https://github.com/Mikmail02/Alt-manager"
 #define AppExeName "CCHub.exe"
@@ -40,12 +40,11 @@ CloseApplications=force
 RestartApplications=yes
 
 [Languages]
-Name: "norwegian"; MessagesFile: "compiler:Languages\Norwegian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Lag snarvei pa skrivebordet"; GroupDescription: "Snarveier"; Flags: unchecked
-Name: "autostart"; Description: "Start {#AppName} ved innlogging"; GroupDescription: "Oppstart"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts"; Flags: unchecked
+Name: "autostart"; Description: "Launch {#AppName} at login"; GroupDescription: "Startup"; Flags: unchecked
 
 [Files]
 Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -61,7 +60,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
 
 [Run]
 Filename: "{app}\{#AppExeName}"; \
-    Description: "Start {#AppName} nå"; \
+    Description: "Launch {#AppName} now"; \
     Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

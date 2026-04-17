@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CC Hub Alt Worker
 // @namespace    https://github.com/Mikmail02/Alt-manager
-// @version      1.0.1
+// @version      1.0.3
 // @description  Alt worker for Case Clicker Hub desktop app
 // @author       Mikmail
 // @match        *://*.case-clicker.com/*
@@ -21,7 +21,7 @@
 (function() {
     'use strict';
 
-    // --- 1. SOCKET FELLE (MÅ KJØRE FØRST) ---
+    // --- 1. SOCKET TRAP (MUST RUN FIRST) ---
     function injectTrap() {
         const script = document.createElement('script');
         script.textContent = `
@@ -76,8 +76,9 @@
     const STATUS_CASE_CACHE_MS = 300000;
     const MAX_LOG_LINES = 250;
 
-    // Integrated clicker (replaces separate script)
+    // Integrated clicker (recursive setTimeout + visual countdown)
     let clickTimer = null;
+    let countdownTimer = null;
     let clickReqCount = 0;
     const CLICK_INTERVAL_MS = 60100;
     const CLICKS_PER_REQ = 500;
@@ -87,7 +88,12 @@
     const NUKE_KEY = 'am.nuke.enabled.alt';
     let nextClickAt = 0;
     let statusUiInterval = null;
-    let currentTab = 'console';
+
+    // Networth tracker
+    let nwTimer = null;
+    let lastNW = null;
+    let lastNWT = null;
+    const NW_POLL_MS = 60000;
 
     window.addEventListener('load', () => {
         initUI();
@@ -106,51 +112,81 @@
             st.id = 'am-ui-style';
             st.textContent = `
                 body.am-nuked > *:not(#alt-worker-ui) { display: none !important; }
+                #alt-worker-ui, #alt-worker-ui * { box-sizing: border-box; }
+                #alt-worker-ui { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+                #alt-worker-ui .aw-card { background: rgba(24,24,27,0.6); border: 1px solid rgba(63,63,70,0.6); border-radius: 10px; padding: 10px; backdrop-filter: blur(8px); }
+                #alt-worker-ui .aw-row { display: flex; gap: 8px; }
+                #alt-worker-ui .aw-input { flex: 1; padding: 9px 11px; background: rgba(9,9,11,0.8); border: 1px solid #27272a; color: #fafafa; border-radius: 8px; font-size: 12px; outline: none; transition: border-color .15s; }
+                #alt-worker-ui .aw-input:focus { border-color: #10b981; }
+                #alt-worker-ui .aw-btn { padding: 9px 14px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 12px; transition: filter .15s, transform .05s; letter-spacing: .02em; }
+                #alt-worker-ui .aw-btn:hover { filter: brightness(1.1); }
+                #alt-worker-ui .aw-btn:active { transform: translateY(1px); }
+                #alt-worker-ui .aw-btn-primary { background: #10b981; color: #052e1a; }
+                #alt-worker-ui .aw-btn-secondary { background: #27272a; color: #fafafa; border: 1px solid #3f3f46; }
+                #alt-worker-ui .aw-pill { display:flex; align-items:center; justify-content:center; gap:6px; min-width: 130px; padding: 0 12px; background: rgba(9,9,11,0.6); border: 1px solid #27272a; border-radius: 8px; font-weight: 700; font-size: 11px; letter-spacing: .05em; }
+                #alt-worker-ui .aw-toggles { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+                #alt-worker-ui .aw-toggle { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: rgba(9,9,11,0.5); border: 1px solid #27272a; border-radius: 8px; cursor: pointer; font-size: 11px; color: #d4d4d8; user-select: none; }
+                #alt-worker-ui .aw-toggle:hover { border-color: #3f3f46; }
+                #alt-worker-ui .aw-switch { position: relative; width: 28px; height: 16px; background: #3f3f46; border-radius: 8px; transition: background .18s; flex-shrink: 0; }
+                #alt-worker-ui .aw-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: #fafafa; border-radius: 50%; transition: left .18s; }
+                #alt-worker-ui .aw-toggle input { display: none; }
+                #alt-worker-ui .aw-toggle input:checked ~ .aw-switch { background: #10b981; }
+                #alt-worker-ui .aw-toggle input:checked ~ .aw-switch::after { left: 14px; }
+                #alt-worker-ui .aw-stat-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 11.5px; }
+                #alt-worker-ui .aw-stat-row span:first-child { color: #a1a1aa; }
+                #alt-worker-ui .aw-stat-row span:last-child { color: #fafafa; font-weight: 600; font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+                #alt-worker-ui .aw-progress-track { margin-top: 8px; height: 6px; background: rgba(9,9,11,0.6); border-radius: 3px; overflow: hidden; border: 1px solid #27272a; }
+                #alt-worker-ui .aw-progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #10b981, #34d399); border-radius: 3px; transition: width .15s linear; }
+                #alt-worker-ui .aw-divider { height: 1px; background: linear-gradient(90deg, transparent, #27272a, transparent); margin: 10px 0; }
+                #alt-worker-ui #status::-webkit-scrollbar { width: 6px; }
+                #alt-worker-ui #status::-webkit-scrollbar-track { background: transparent; }
+                #alt-worker-ui #status::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
             `;
             document.documentElement.appendChild(st);
         }
 
         const div = document.createElement('div');
         div.id = 'alt-worker-ui';
-        div.style = "position:fixed; bottom:16px; right:16px; background:#0b0b0b; color:#d4d4d4; padding:0; border-radius:10px; z-index:2147483647; font-family:Inter,monospace; width: 460px; border:1px solid #2c2c2c; font-size:12px; opacity:0.98; box-shadow: 0 12px 40px rgba(0,0,0,0.6); display:flex; flex-direction:column; overflow:hidden;";
+        div.style = "position:fixed; bottom:16px; right:16px; background: linear-gradient(145deg, rgba(9,9,11,0.95), rgba(24,24,27,0.95)); color:#fafafa; padding:0; border-radius:14px; z-index:2147483647; width: 460px; border:1px solid rgba(63,63,70,0.6); font-size:12px; box-shadow: 0 20px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.03) inset; display:flex; flex-direction:column; overflow:hidden; backdrop-filter: blur(12px);";
 
         div.innerHTML = `
-            <div id="drag-handle" style="padding: 10px; background:#131313; border-bottom:1px solid #2c2c2c; cursor:move; text-align:center; color:#10b981; font-weight:700; user-select:none;">
-                Alt Manager Worker
+            <div id="drag-handle" style="padding: 12px 14px; background: linear-gradient(180deg, rgba(16,185,129,0.08), transparent); border-bottom: 1px solid rgba(63,63,70,0.4); cursor: move; display: flex; align-items: center; gap: 10px; user-select: none;">
+                <div id="aw-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #6b7280; box-shadow: 0 0 8px rgba(107,114,128,0.5); transition: all .2s;"></div>
+                <div style="font-weight: 700; color: #10b981; font-size: 13px; letter-spacing: .02em; flex: 1;">Alt Manager Worker</div>
+                <div style="font-size: 10px; color: #71717a; font-variant-numeric: tabular-nums;">v1.0.3</div>
             </div>
-            <div style="padding:12px;">
-                <div style="display:flex; gap:8px; margin-bottom:8px;">
-                    <input id="ngrok_url" placeholder="Lim inn fra CC Hub tray > Kopier worker-link" style="flex:1; padding:8px; background:#1a1a1a; border:1px solid #333; color:#fff; border-radius:6px; box-sizing:border-box;">
-                    <button id="btn_link" style="min-width:110px; background:#10b981; border:none; padding:8px; color:#000; cursor:pointer; font-weight:700; border-radius:6px;">CONNECT</button>
+            <div style="padding: 12px;">
+                <div class="aw-row" style="margin-bottom: 8px;">
+                    <input id="ngrok_url" class="aw-input" placeholder="Paste link from CC Hub tray > Copy worker link">
+                    <button id="btn_link" class="aw-btn aw-btn-primary" style="min-width: 110px;">CONNECT</button>
                 </div>
-                <div style="display:flex; gap:8px; margin-bottom:8px;">
-                    <button id="btn_ping" style="flex:1; background:#2563eb; border:none; padding:8px; color:#fff; cursor:pointer; font-weight:700; border-radius:6px;">TEST LINK</button>
-                    <span id="conn_state" style="display:flex; align-items:center; justify-content:center; min-width:120px; background:#1a1a1a; border:1px solid #333; border-radius:6px; color:#9ca3af; font-weight:700;">DISCONNECTED</span>
+                <div class="aw-row" style="margin-bottom: 10px;">
+                    <button id="btn_ping" class="aw-btn aw-btn-secondary" style="flex: 1;">TEST LINK</button>
+                    <span id="conn_state" class="aw-pill" style="color: #9ca3af;">DISCONNECTED</span>
                 </div>
-                <div style="display:flex; gap:10px; margin-top:6px; font-size:11px;">
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                        <input id="opt_click" type="checkbox"> Auto Click
-                    </label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                        <input id="opt_vault" type="checkbox"> Auto Vault
-                    </label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                        <input id="opt_nuke" type="checkbox"> Nuke UI
-                    </label>
+                <div class="aw-toggles">
+                    <label class="aw-toggle"><span>Auto Click</span><input id="opt_click" type="checkbox"><span class="aw-switch"></span></label>
+                    <label class="aw-toggle"><span>Auto Vault</span><input id="opt_vault" type="checkbox"><span class="aw-switch"></span></label>
+                    <label class="aw-toggle"><span>Nuke UI</span><input id="opt_nuke" type="checkbox"><span class="aw-switch"></span></label>
                 </div>
-                <div style="display:flex; gap:6px; margin-top:10px;">
-                    <button id="tab_console" style="flex:1; background:#1f2937; color:#fff; border:1px solid #374151; border-radius:6px; padding:6px; font-weight:700; cursor:pointer;">Console</button>
-                    <button id="tab_status" style="flex:1; background:#111; color:#9ca3af; border:1px solid #333; border-radius:6px; padding:6px; font-weight:700; cursor:pointer;">Status</button>
+                <div class="aw-divider"></div>
+                <div class="aw-card" style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span id="aw-status-text" style="color: #e4e4e7; font-weight: 600; font-size: 12px;">Idle</span>
+                        <span id="st_timer" style="color: #10b981; font-weight: 700; font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">--</span>
+                    </div>
+                    <div class="aw-progress-track"><div id="aw-progress" class="aw-progress-bar"></div></div>
                 </div>
-                <div id="status" style="margin-top:8px; color:#cfcfcf; border-top:1px solid #2c2c2c; padding-top:8px; height:220px; overflow-y:auto; line-height:1.45; font-family:JetBrains Mono,monospace; font-size:11px;">Waiting...</div>
-                <div id="status_panel" style="display:none; margin-top:8px; border-top:1px solid #2c2c2c; padding-top:10px; height:220px; overflow-y:auto; font-family:JetBrains Mono,monospace; font-size:12px; line-height:1.6;">
-                    <div style="display:flex; justify-content:space-between;"><span>Waiting...</span><span id="st_timer">--</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span>Total Clicks</span><span id="st_clicks">0</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span>Effective CPS</span><span id="st_cps">0.00</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span>Current Networth</span><span id="st_nw">-</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span>Case Sell Value (70%)</span><span id="st_case_val">$0</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span>Total Errors</span><span id="st_errors">0</span></div>
+                <div class="aw-card" style="margin-bottom: 8px;">
+                    <div class="aw-stat-row"><span>Total Clicks</span><span id="st_clicks">0</span></div>
+                    <div class="aw-stat-row"><span>Effective CPS</span><span id="st_cps">0.00</span></div>
+                    <div class="aw-stat-row"><span>Networth</span><span id="st_nw">-</span></div>
+                    <div class="aw-stat-row"><span>Change (1m)</span><span id="st_delta" style="color:#71717a!important;">-</span></div>
+                    <div class="aw-stat-row"><span>Hourly Rate</span><span id="st_hourly" style="color:#71717a!important;">-</span></div>
+                    <div class="aw-stat-row"><span>Cases Sell (70%)</span><span id="st_case_val">$0</span></div>
+                    <div class="aw-stat-row"><span>Errors</span><span id="st_errors">0</span></div>
                 </div>
+                <div id="status" style="color:#a1a1aa; background: rgba(9,9,11,0.4); border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px; height: 100px; overflow-y: auto; line-height: 1.5; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px;">Waiting...</div>
             </div>
         `;
         document.body.appendChild(div);
@@ -189,11 +225,10 @@
             document.body.classList.toggle('am-nuked', nukeCb.checked);
         };
         document.body.classList.toggle('am-nuked', nukeCb.checked);
-        document.getElementById('tab_console').onclick = () => switchTab('console');
-        document.getElementById('tab_status').onclick = () => switchTab('status');
-        switchTab('console');
         if (statusUiInterval) clearInterval(statusUiInterval);
         statusUiInterval = setInterval(updateStatusPanel, STATUS_PANEL_TICK_MS);
+        if (countdownTimer) clearInterval(countdownTimer);
+        countdownTimer = setInterval(updateCountdown, 150);
 
         const urlInput = document.getElementById('ngrok_url');
         // Keep the input usable: stop the host page from eating paste / key events.
@@ -255,62 +290,54 @@
         while (s.childNodes.length > MAX_LOG_LINES) s.removeChild(s.lastChild);
     }
 
-    function switchTab(tab) {
-        currentTab = tab;
-        const consoleBtn = document.getElementById('tab_console');
-        const statusBtn = document.getElementById('tab_status');
-        const consoleView = document.getElementById('status');
-        const statusView = document.getElementById('status_panel');
-        if (!consoleBtn || !statusBtn || !consoleView || !statusView) return;
-        if (tab === 'status') {
-            statusBtn.style.background = '#1f2937';
-            statusBtn.style.color = '#fff';
-            statusBtn.style.border = '1px solid #374151';
-            consoleBtn.style.background = '#111';
-            consoleBtn.style.color = '#9ca3af';
-            consoleBtn.style.border = '1px solid #333';
-            consoleView.style.display = 'none';
-            statusView.style.display = 'block';
-        } else {
-            consoleBtn.style.background = '#1f2937';
-            consoleBtn.style.color = '#fff';
-            consoleBtn.style.border = '1px solid #374151';
-            statusBtn.style.background = '#111';
-            statusBtn.style.color = '#9ca3af';
-            statusBtn.style.border = '1px solid #333';
-            consoleView.style.display = 'block';
-            statusView.style.display = 'none';
+    function updateCountdown() {
+        const progEl = document.getElementById('aw-progress');
+        const timerEl = document.getElementById('st_timer');
+        const statusEl = document.getElementById('aw-status-text');
+        if (!progEl || !timerEl || !statusEl) return;
+
+        const enabled = GM_getValue(CLICK_KEY, true);
+        if (!enabled) {
+            progEl.style.width = '0%';
+            timerEl.innerText = '--';
+            if (statusEl.dataset.state !== 'paused') {
+                statusEl.dataset.state = 'paused';
+                statusEl.innerText = 'Paused';
+                statusEl.style.color = '#fbbf24';
+            }
+            return;
+        }
+        const now = Date.now();
+        const remainMs = Math.max(0, nextClickAt - now);
+        const sec = Math.ceil(remainMs / 1000);
+        const pct = Math.max(0, Math.min(100, 100 - (remainMs / CLICK_INTERVAL_MS) * 100));
+        progEl.style.width = pct + '%';
+        timerEl.innerText = `${sec}s`;
+        if (statusEl.dataset.state === 'sending' || statusEl.dataset.state === 'error') return;
+        if (statusEl.dataset.state !== 'waiting') {
+            statusEl.dataset.state = 'waiting';
+            statusEl.innerText = 'Waiting';
+            statusEl.style.color = '#e4e4e7';
         }
     }
 
     async function updateStatusPanel() {
-        const timerEl = document.getElementById('st_timer');
         const clicksEl = document.getElementById('st_clicks');
         const cpsEl = document.getElementById('st_cps');
-        const nwEl = document.getElementById('st_nw');
         const caseValEl = document.getElementById('st_case_val');
         const errEl = document.getElementById('st_errors');
-        if (!timerEl || !clicksEl || !cpsEl || !nwEl || !caseValEl || !errEl) return;
+        if (!clicksEl || !cpsEl || !caseValEl || !errEl) return;
 
-        const now = Date.now();
-        const remainMs = Math.max(0, nextClickAt - now);
-        const sec = Math.ceil(remainMs / 1000);
-        timerEl.innerText = GM_getValue(CLICK_KEY, true) ? `${sec}s` : '--';
         clicksEl.innerText = (clickReqCount * CLICKS_PER_REQ).toLocaleString();
         cpsEl.innerText = (CLICKS_PER_REQ / (CLICK_INTERVAL_MS / 1000)).toFixed(2);
         errEl.innerText = totalErrors.toString();
 
-        if (currentTab !== 'status' || document.visibilityState !== 'visible') return;
+        if (document.visibilityState !== 'visible') return;
         if (statusFetchInFlight) return;
         if ((Date.now() - statusLastFetchAt) < STATUS_NETWORK_MS) return;
         statusFetchInFlight = true;
         statusLastFetchAt = Date.now();
         try {
-            const meRes = await fetch('/api/me', { cache: 'no-cache' });
-            if (meRes.ok) {
-                const me = await meRes.json();
-                nwEl.innerText = Math.floor(me.networth || 0).toLocaleString();
-            }
             if (!statusCasePriceMap || (Date.now() - statusCasePriceMapAt) > STATUS_CASE_CACHE_MS) {
                 const allCasesRes = await fetch('/api/cases/cases', { cache: 'no-cache' });
                 if (allCasesRes.ok) {
@@ -337,6 +364,47 @@
         } finally {
             statusFetchInFlight = false;
         }
+    }
+
+    async function pollNW() {
+        const nwEl = document.getElementById('st_nw');
+        const deltaEl = document.getElementById('st_delta');
+        const hourlyEl = document.getElementById('st_hourly');
+        if (!nwEl || !deltaEl || !hourlyEl) return;
+        try {
+            const res = await fetch('/api/me', { cache: 'no-cache' });
+            if (!res.ok) return;
+            const me = await res.json();
+            const nw = Math.floor(Number(me.networth || 0));
+            const t = Date.now();
+            nwEl.innerText = '$' + nw.toLocaleString();
+            if (lastNW !== null && lastNWT !== null) {
+                const delta = nw - lastNW;
+                const dtMs = t - lastNWT;
+                const perHour = dtMs > 0 ? Math.round(delta * 3600000 / dtMs) : 0;
+                const sign = delta >= 0 ? '+' : '';
+                const color = delta > 0 ? '#10b981' : delta < 0 ? '#ef4444' : '#71717a';
+                deltaEl.innerText = `${sign}$${delta.toLocaleString()}`;
+                deltaEl.style.color = color;
+                const hSign = perHour >= 0 ? '+' : '';
+                hourlyEl.innerText = `${hSign}$${perHour.toLocaleString()}/h`;
+                hourlyEl.style.color = color;
+            }
+            lastNW = nw;
+            lastNWT = t;
+        } catch (_) {}
+    }
+
+    function startNWTracker() {
+        if (nwTimer) clearInterval(nwTimer);
+        pollNW();
+        nwTimer = setInterval(pollNW, NW_POLL_MS);
+    }
+
+    function stopNWTracker() {
+        if (nwTimer) { clearInterval(nwTimer); nwTimer = null; }
+        lastNW = null;
+        lastNWT = null;
     }
 
     const DEFAULT_BACKEND_URL = 'https://127.0.0.1:5000';
@@ -374,17 +442,22 @@
         connState = state;
         isConnected = state === 'connected';
         const el = document.getElementById('conn_state');
+        const dot = document.getElementById('aw-dot');
+        const map = {
+            idle:         ['DISCONNECTED',   '#9ca3af', '#333',      '#6b7280'],
+            connecting:   ['CONNECTING...',  '#eab308', '#eab30855', '#eab308'],
+            connected:    ['CONNECTED',      '#10b981', '#10b98155', '#10b981'],
+            reconnecting: ['RECONNECTING...','#f59e0b', '#f59e0b55', '#f59e0b'],
+        };
+        const [label, color, border, dotColor] = map[state] || map.idle;
         if (el) {
-            const map = {
-                idle:         ['DISCONNECTED',   '#9ca3af', '#333'],
-                connecting:   ['CONNECTING...',  '#eab308', '#eab30855'],
-                connected:    ['CONNECTED',      '#10b981', '#10b98155'],
-                reconnecting: ['RECONNECTING...','#f59e0b', '#f59e0b55'],
-            };
-            const [label, color, border] = map[state] || map.idle;
             el.textContent = label;
             el.style.color = color;
             el.style.borderColor = border;
+        }
+        if (dot) {
+            dot.style.background = dotColor;
+            dot.style.boxShadow = `0 0 10px ${dotColor}aa`;
         }
         refreshConnectButton();
     }
@@ -396,6 +469,7 @@
         activeBaseUrl = '';
         cachedMe = null;
         connectedSince = 0;
+        stopNWTracker();
         if (!keepAutoReconnect) GM_setValue('am.autoconnect.alt', false);
         setConnState('idle');
         log("Disconnected.");
@@ -430,6 +504,7 @@
         log("Connecting to " + baseUrl);
         heartbeat(baseUrl);
         toggleClickLoop();
+        startNWTracker();
     }
 
     function scheduleHeartbeat(delayMs) {
@@ -587,7 +662,7 @@
     }
 
     function reportRemote(baseUrl, id, msg) {
-        log("LOGG: " + msg);
+        log("LOG: " + msg);
         gmRequest({
             method: "POST", url: `${baseUrl}/api/log_status`,
             headers: { "Content-Type": "application/json" },
@@ -607,9 +682,17 @@
         return null;
     }
 
+    function setClickStatus(state, text, color) {
+        const el = document.getElementById('aw-status-text');
+        if (!el) return;
+        el.dataset.state = state;
+        el.innerText = text;
+        el.style.color = color;
+    }
+
     async function runClickBatch() {
         if (!GM_getValue(CLICK_KEY, true)) return;
-        nextClickAt = Date.now() + CLICK_INTERVAL_MS;
+        setClickStatus('sending', 'Sending...', '#6366f1');
         try {
             const res = await fetch('/api/caseClick', {
                 method: 'POST',
@@ -619,26 +702,46 @@
             if (!res.ok) {
                 totalErrors++;
                 log(`Click batch failed: ${res.status}`);
+                setClickStatus('error', `Error ${res.status}`, '#ef4444');
+                setTimeout(() => {
+                    const el = document.getElementById('aw-status-text');
+                    if (el && el.dataset.state === 'error') el.dataset.state = '';
+                }, 2000);
                 return;
             }
             clickReqCount++;
             if (GM_getValue(VAULT_KEY, true) && clickReqCount % VAULT_EVERY_N_REQ === 0) {
-                await fetch('/api/vault', { method: 'POST' });
+                try { await fetch('/api/vault', { method: 'POST' }); } catch (_) {}
             }
+            setClickStatus('', 'Waiting', '#e4e4e7');
         } catch (e) {
             totalErrors++;
             log(`Click batch error: ${e.message}`);
+            setClickStatus('error', 'Network error', '#ef4444');
+            setTimeout(() => {
+                const el = document.getElementById('aw-status-text');
+                if (el && el.dataset.state === 'error') el.dataset.state = '';
+            }, 2000);
         }
     }
 
-    function toggleClickLoop() {
-        if (clickTimer) {
-            clearInterval(clickTimer);
-            clickTimer = null;
-        }
+    function scheduleNextClick() {
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
         if (!GM_getValue(CLICK_KEY, true)) return;
-        runClickBatch();
-        clickTimer = setInterval(runClickBatch, CLICK_INTERVAL_MS);
+        nextClickAt = Date.now() + CLICK_INTERVAL_MS;
+        clickTimer = setTimeout(async () => {
+            await runClickBatch();
+            scheduleNextClick();
+        }, CLICK_INTERVAL_MS);
+    }
+
+    function toggleClickLoop() {
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+        if (!GM_getValue(CLICK_KEY, true)) {
+            setClickStatus('paused', 'Paused', '#fbbf24');
+            return;
+        }
+        runClickBatch().then(scheduleNextClick);
     }
 
     // Passive socket observer — we never reload the page or touch the socket.
@@ -899,7 +1002,7 @@
             onHeartbeatFailure(reason);
         };
 
-        let me = { _id: null, name: "Ukjent" };
+        let me = { _id: null, name: "Unknown" };
         try {
             const tokenRes = await fetch('/api/auth/token');
             if (tokenRes.status !== 200) return fail('auth/token ' + tokenRes.status);
