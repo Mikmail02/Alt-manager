@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CC Hub Main Worker
 // @namespace    https://github.com/Mikmail02/Alt-manager
-// @version      1.0.6
+// @version      1.0.8
 // @description  Main worker for Case Clicker Hub desktop app
 // @author       Mikmail
 // @match        *://*.case-clicker.com/*
@@ -158,7 +158,7 @@
             <div id="drag-handle" style="padding: 12px 14px; background: linear-gradient(180deg, rgba(255,215,0,0.08), transparent); border-bottom: 1px solid rgba(124,111,58,0.4); cursor: move; display: flex; align-items: center; gap: 10px; user-select: none;">
                 <div id="aw-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #6b7280; box-shadow: 0 0 8px rgba(107,114,128,0.5); transition: all .2s;"></div>
                 <div style="font-weight: 700; color: #ffd700; font-size: 13px; letter-spacing: .02em; flex: 1;">Main Manager Worker</div>
-                <div style="font-size: 10px; color: #8b7d45; font-variant-numeric: tabular-nums;">v1.0.6</div>
+                <div style="font-size: 10px; color: #8b7d45; font-variant-numeric: tabular-nums;">v1.0.8</div>
             </div>
             <div style="padding: 12px;">
                 <div class="aw-row" style="margin-bottom: 8px;">
@@ -575,7 +575,7 @@
             if (chunk <= 0) break;
             let ok = false;
             // Primary flow: exact format used by the stable reference script.
-            for (let tries = 0; tries < 3; tries++) {
+            for (let tries = 0; tries < 5; tries++) {
                 try {
                     const res = await fetch('/api/cases', {
                         method: 'POST',
@@ -587,8 +587,11 @@
                         ok = true;
                         break;
                     }
-                    await new Promise(r => setTimeout(r, 180));
-                } catch (_) {}
+                    const backoff = (res.status === 403 || res.status === 429 || res.status >= 500) ? 800 * (tries + 1) : 180;
+                    await new Promise(r => setTimeout(r, backoff));
+                } catch (_) {
+                    await new Promise(r => setTimeout(r, 800 * (tries + 1)));
+                }
             }
             if (!ok && chunk === 1) {
                 // Last-resort fallback when backend expects query id shape.
@@ -617,13 +620,34 @@
         return { ok: true, status: 200, bought };
     }
 
+    /** Fetch with backoff retry on transient CC statuses (403/429/5xx) and network errors.
+     *  Keeps worker "connected" on temporary case-clicker.com hiccups instead of dropping the hub link. */
+    async function fetchWithRetry(url, options, maxAttempts = 3) {
+        const opts = options || {};
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const isLast = attempt === maxAttempts - 1;
+            try {
+                const res = await fetch(url, opts);
+                if ((res.status === 403 || res.status === 429 || res.status >= 500) && !isLast) {
+                    await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+                    continue;
+                }
+                return res;
+            } catch (e) {
+                if (isLast) throw e;
+                await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+            }
+        }
+        throw new Error('fetchWithRetry exhausted');
+    }
+
     /** Fetch URL and parse JSON safely. Retries on HTML response or 429. Avoids "Unexpected token '<'" when server returns error page. */
     async function safeFetchJson(url, options = {}, retries = 2) {
         const opts = { cache: 'no-cache', ...options };
         for (let attempt = 0; attempt <= retries; attempt++) {
             const res = await fetch(url, opts);
             const text = await res.text();
-            if (res.status === 429 && attempt < retries) {
+            if ((res.status === 403 || res.status === 429 || res.status >= 500) && attempt < retries) {
                 const wait = 2000 * (attempt + 1);
                 await new Promise(r => setTimeout(r, wait));
                 continue;
@@ -994,14 +1018,14 @@
 
         let me = { _id: null, name: "Unknown" };
         try {
-            const tokenRes = await fetch('/api/auth/token');
+            const tokenRes = await fetchWithRetry('/api/auth/token', {}, 2);
             if (tokenRes.status !== 200) return fail('auth/token ' + tokenRes.status);
             const json = await tokenRes.json();
             const jwt = parseJwt(json.token);
             if (jwt) { me._id = jwt.id || jwt.sub; me.name = jwt.name; }
             if (!me._id) return fail('no jwt id');
 
-            const statsRes = await fetch('/api/me');
+            const statsRes = await fetchWithRetry('/api/me', {}, 2);
             if (statsRes.status !== 200) return fail('me ' + statsRes.status);
             const fullStats = await statsRes.json();
             if (!cachedProfileMeta) cachedProfileMeta = await fetchPublicProfileImage(me._id);
@@ -1272,12 +1296,12 @@
                     };
                     
                     try {
-                        const openRes = await fetch(openEndpoint, {
+                        const openRes = await fetchWithRetry(openEndpoint, {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(openPayload)
-                        });
-                        
+                        }, 5);
+
                         if(!openRes.ok) break;
                         await new Promise(resolve => setTimeout(resolve, 900));
                     } catch(e) {
@@ -1354,7 +1378,7 @@
                     }
 
                     const openEndpoint = caseType === 'capsule' ? '/api/open/capsule' : '/api/open/case';
-                    const openRes = await fetch(openEndpoint, {
+                    const openRes = await fetchWithRetry(openEndpoint, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
@@ -1363,7 +1387,7 @@
                             autoOpenConfig: { autosellActivated: true, autosellVariant },
                             count: String(batchSize)
                         })
-                    });
+                    }, 5);
                     if (!openRes.ok) {
                         throw new Error(`Open failed (${openRes.status})`);
                     }
