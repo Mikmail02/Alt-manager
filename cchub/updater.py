@@ -24,6 +24,19 @@ from .version import GITHUB_OWNER, GITHUB_REPO, __version__
 # Release-asset suffix we look for on the current platform.
 _ASSET_EXT = ".dmg" if sys.platform == "darwin" else ".exe"
 
+
+def _ssl_context() -> ssl.SSLContext:
+    """SSL context that works inside PyInstaller bundles.
+
+    Default context on frozen macOS apps sometimes can't find a CA store;
+    certifi bundles Mozilla's curated roots and is safe to prefer on all OSes.
+    """
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
@@ -56,7 +69,7 @@ def fetch_latest(timeout: float = 10.0) -> Optional[ReleaseInfo]:
         },
     )
     try:
-        ctx = ssl.create_default_context()
+        ctx = _ssl_context()
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception:
@@ -109,7 +122,7 @@ def fetch_commits_between(old_tag: str, new_tag: str, timeout: float = 10.0) -> 
         },
     )
     try:
-        ctx = ssl.create_default_context()
+        ctx = _ssl_context()
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception:
@@ -132,7 +145,8 @@ def download_installer(release: ReleaseInfo) -> Optional[Path]:
     tmp = Path(tempfile.gettempdir()) / filename
     req = urllib.request.Request(release.installer_url, headers={"User-Agent": f"CCHub/{__version__}"})
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as f:
+        ctx = _ssl_context()
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp, open(tmp, "wb") as f:
             while True:
                 chunk = resp.read(1024 * 64)
                 if not chunk:

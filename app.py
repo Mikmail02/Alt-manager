@@ -44,12 +44,16 @@ def panel_config():
 
 @app.route("/api/check_update", methods=["POST"])
 def api_check_update():
-    """Manual update check from the sidebar button. Only reached from localhost
-    (auth middleware lets the webview through) so no extra auth needed.
-    """
-    release = updater.fetch_latest()
+    """Manual update check from the sidebar button."""
+    try:
+        release = updater.fetch_latest()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"fetch_latest crashed: {exc}"}), 500
     if release is None:
-        return jsonify({"ok": False, "error": "Could not reach GitHub"}), 502
+        return jsonify({
+            "ok": False,
+            "error": "Could not reach GitHub (network or SSL issue). Check logs in tray → Open logs.",
+        }), 502
     required = updater.is_update_required(release)
     return jsonify({
         "ok": True,
@@ -2042,24 +2046,56 @@ HTML_UI = """
         });
     }
 
+    function _fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.setAttribute('readonly', '');
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        return ok;
+    }
+
     async function copyWorkerLink() {
         const btn = document.getElementById('copyWorkerLinkBtn');
         if (!btn) return;
         const original = btn.textContent;
+        let link = null;
         try {
             const res = await fetch('/config', { cache: 'no-cache' });
             const cfg = await res.json();
-            const link = `${cfg.base_url}#${cfg.token}`;
-            await navigator.clipboard.writeText(link);
+            link = `${cfg.base_url}#${cfg.token}`;
+        } catch (e) {
+            btn.textContent = 'NETWORK ERROR';
+            setTimeout(() => { btn.textContent = original; }, 1800);
+            return;
+        }
+
+        let copied = false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(link);
+                copied = true;
+            }
+        } catch (e) { /* fall through to execCommand */ }
+        if (!copied) copied = _fallbackCopy(link);
+
+        if (copied) {
             btn.textContent = 'COPIED!';
             btn.classList.add('copied');
-        } catch (e) {
-            btn.textContent = 'COPY FAILED';
-        } finally {
             setTimeout(() => {
                 btn.textContent = original;
                 btn.classList.remove('copied');
             }, 1400);
+        } else {
+            // Last resort: show the URL so the user can copy manually.
+            window.prompt('Copy the worker link below:', link);
+            btn.textContent = original;
         }
     }
 
@@ -2075,6 +2111,7 @@ HTML_UI = """
             if (!data.ok) {
                 btn.textContent = 'CHECK FAILED';
                 setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1800);
+                window.alert('Update check failed: ' + (data.error || 'unknown'));
                 return;
             }
             if (!data.update_available) {

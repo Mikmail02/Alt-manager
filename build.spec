@@ -13,7 +13,7 @@ datas = [
     (str(ROOT / "assets" / "icon.ico"), "assets"),
 ]
 
-hiddenimports = []
+hiddenimports = ["certifi"]
 hiddenimports += collect_submodules("cryptography")
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("webview")
