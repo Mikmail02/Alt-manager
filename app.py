@@ -956,6 +956,9 @@ HTML_UI = """
         .settings-area { padding: 20px; border-top: 1px solid var(--border); }
         .settings-input { background: #111; border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; font-size: 11px; margin-bottom: 8px; font-family: 'JetBrains Mono'; }
         .save-btn { width: 100%; background: #fff; color: #000; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: 800; font-size: 10px; transition: 0.2s; letter-spacing: 0.5px; }
+        .copy-link-btn { width: 100%; background: transparent; color: #a1a1aa; border: 1px solid #27272a; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 10px; letter-spacing: 0.5px; margin-top: 6px; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+        .copy-link-btn:hover { background: #18181b; color: #fafafa; border-color: #3f3f46; }
+        .copy-link-btn.copied { background: #10b981; color: #052e1a; border-color: #10b981; }
 
         /* MAIN CONTENT AREA */
         .main { flex: 1; display: flex; flex-direction: column; background: var(--bg-dark); position: relative; overflow: hidden; }
@@ -1307,6 +1310,7 @@ HTML_UI = """
         <div style="font-size:10px; font-weight:700; color:#555; margin-bottom:5px;">MAIN ACCOUNT ID</div>
         <input id="mainId" class="settings-input" placeholder="ID...">
         <button onclick="saveSettings()" class="save-btn">SAVE CONFIG</button>
+        <button id="copyWorkerLinkBtn" onclick="copyWorkerLink()" class="copy-link-btn" title="Copy the link workers paste into Tampermonkey">COPY WORKER LINK</button>
     </div>
 </div>
 
@@ -1998,6 +2002,27 @@ HTML_UI = """
         navigator.clipboard.writeText(link).then(() => {
             console.log("Copied:", link);
         });
+    }
+
+    async function copyWorkerLink() {
+        const btn = document.getElementById('copyWorkerLinkBtn');
+        if (!btn) return;
+        const original = btn.textContent;
+        try {
+            const res = await fetch('/config', { cache: 'no-cache' });
+            const cfg = await res.json();
+            const link = `${cfg.base_url}#${cfg.token}`;
+            await navigator.clipboard.writeText(link);
+            btn.textContent = 'COPIED!';
+            btn.classList.add('copied');
+        } catch (e) {
+            btn.textContent = 'COPY FAILED';
+        } finally {
+            setTimeout(() => {
+                btn.textContent = original;
+                btn.classList.remove('copied');
+            }, 1400);
+        }
     }
 
     function setTab(t) {
