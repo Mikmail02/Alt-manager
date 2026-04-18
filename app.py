@@ -7,7 +7,7 @@ import threading
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 
-from cchub import auth, config as app_config, paths, updater
+from cchub import auth, config as app_config, network, paths, updater
 from cchub.version import __version__
 
 PORT = 5000
@@ -34,8 +34,7 @@ def api_ping():
 
 @app.route("/config")
 def panel_config():
-    public = app_config.public_url()
-    base = public if public else f"http://127.0.0.1:{PORT}"
+    base = network.worker_base_url(app_config.public_url(), PORT)
     return jsonify({
         "token": app_config.token(),
         "version": __version__,

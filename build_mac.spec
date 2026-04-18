@@ -76,8 +76,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "Case Clicker Hub",
         "CFBundleDisplayName": "Case Clicker Hub",
-        "CFBundleShortVersionString": "1.0.11",
-        "CFBundleVersion": "1.0.11",
+        "CFBundleShortVersionString": "1.0.12",
+        "CFBundleVersion": "1.0.12",
         "NSHighResolutionCapable": True,
         # Tray-only apps can hide the Dock icon with LSUIElement=1, but we keep
         # the window so a regular app (no LSUIElement) is the right behaviour.

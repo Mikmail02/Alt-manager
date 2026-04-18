@@ -161,13 +161,7 @@ def _hide_window() -> None:
 
 def _worker_base_url() -> str:
     """Best URL for workers: manual override > auto-detected Tailscale IP > localhost."""
-    override = app_config.public_url()
-    if override:
-        return override
-    detected = network.detect_tailscale_ip()
-    if detected:
-        return f"http://{detected}:5000"
-    return "http://127.0.0.1:5000"
+    return network.worker_base_url(app_config.public_url())
 
 
 def _copy_worker_link() -> None:

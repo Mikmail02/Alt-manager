@@ -40,6 +40,16 @@ def _tailscale_binary() -> Optional[str]:
     return "tailscale"  # fall back to PATH lookup
 
 
+def worker_base_url(override: Optional[str] = None, port: int = 5000) -> str:
+    """Best URL for workers: explicit override > auto-detected Tailscale IP > localhost."""
+    if override:
+        return override.rstrip("/")
+    detected = detect_tailscale_ip()
+    if detected:
+        return f"http://{detected}:{port}"
+    return f"http://127.0.0.1:{port}"
+
+
 def detect_tailscale_ip() -> Optional[str]:
     """Return the local Tailscale IPv4, or None if unavailable."""
     binary = _tailscale_binary()
