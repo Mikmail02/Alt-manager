@@ -7,7 +7,7 @@ import threading
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 
-from cchub import auth, config as app_config, paths
+from cchub import auth, config as app_config, paths, updater
 from cchub.version import __version__
 
 PORT = 5000
@@ -41,6 +41,44 @@ def panel_config():
         "version": __version__,
         "base_url": base,
     })
+
+
+@app.route("/api/check_update", methods=["POST"])
+def api_check_update():
+    """Manual update check from the sidebar button. Only reached from localhost
+    (auth middleware lets the webview through) so no extra auth needed.
+    """
+    release = updater.fetch_latest()
+    if release is None:
+        return jsonify({"ok": False, "error": "Could not reach GitHub"}), 502
+    required = updater.is_update_required(release)
+    return jsonify({
+        "ok": True,
+        "current": __version__,
+        "latest": release.tag,
+        "update_available": required,
+        "has_installer": release.installer_url is not None,
+    })
+
+
+@app.route("/api/apply_update", methods=["POST"])
+def api_apply_update():
+    """Download and launch the latest installer. On success the response returns
+    just before the process exits so the UI can show a progress state briefly."""
+    release = updater.fetch_latest()
+    if release is None or not updater.is_update_required(release):
+        return jsonify({"ok": False, "error": "No update available"}), 400
+
+    installer = updater.download_installer(release)
+    if installer is None:
+        return jsonify({"ok": False, "error": "Download failed"}), 502
+
+    def _launch_and_exit():
+        time.sleep(0.4)  # let the HTTP response flush
+        updater.launch_installer_and_exit(installer)
+
+    threading.Thread(target=_launch_and_exit, name="cchub-apply-update", daemon=True).start()
+    return jsonify({"ok": True, "tag": release.tag})
 
 def load_db():
     if not os.path.exists(DATA_FILE):
@@ -1311,6 +1349,7 @@ HTML_UI = """
         <input id="mainId" class="settings-input" placeholder="ID...">
         <button onclick="saveSettings()" class="save-btn">SAVE CONFIG</button>
         <button id="copyWorkerLinkBtn" onclick="copyWorkerLink()" class="copy-link-btn" title="Copy the link workers paste into Tampermonkey">COPY WORKER LINK</button>
+        <button id="checkUpdateBtn" onclick="checkForUpdate()" class="copy-link-btn" title="Check GitHub for a newer release">CHECK FOR UPDATES</button>
     </div>
 </div>
 
@@ -2022,6 +2061,57 @@ HTML_UI = """
                 btn.textContent = original;
                 btn.classList.remove('copied');
             }, 1400);
+        }
+    }
+
+    async function checkForUpdate() {
+        const btn = document.getElementById('checkUpdateBtn');
+        if (!btn) return;
+        const original = btn.textContent;
+        btn.textContent = 'CHECKING...';
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/check_update', { method: 'POST' });
+            const data = await res.json();
+            if (!data.ok) {
+                btn.textContent = 'CHECK FAILED';
+                setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1800);
+                return;
+            }
+            if (!data.update_available) {
+                btn.textContent = `UP TO DATE (${data.current})`;
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = original;
+                    btn.classList.remove('copied');
+                    btn.disabled = false;
+                }, 1800);
+                return;
+            }
+            if (!data.has_installer) {
+                btn.textContent = 'NO INSTALLER FOR YOUR OS';
+                setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2200);
+                return;
+            }
+            const go = confirm(`New version available: ${data.latest}\n(you have ${data.current})\n\nDownload and install now?`);
+            if (!go) {
+                btn.textContent = original;
+                btn.disabled = false;
+                return;
+            }
+            btn.textContent = 'DOWNLOADING...';
+            const applyRes = await fetch('/api/apply_update', { method: 'POST' });
+            const applyData = await applyRes.json();
+            if (applyData.ok) {
+                btn.textContent = 'INSTALLER LAUNCHED';
+                // App will exit shortly; no need to re-enable button.
+            } else {
+                btn.textContent = 'UPDATE FAILED';
+                setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2200);
+            }
+        } catch (e) {
+            btn.textContent = 'CHECK FAILED';
+            setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1800);
         }
     }
 
