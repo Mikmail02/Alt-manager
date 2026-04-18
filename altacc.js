@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CC Hub Alt Worker
 // @namespace    https://github.com/Mikmail02/Alt-manager
-// @version      1.0.8
+// @version      1.0.9
 // @description  Alt worker for Case Clicker Hub desktop app
 // @author       Mikmail
 // @match        *://*.case-clicker.com/*
@@ -154,7 +154,7 @@
             <div id="drag-handle" style="padding: 12px 14px; background: linear-gradient(180deg, rgba(16,185,129,0.08), transparent); border-bottom: 1px solid rgba(63,63,70,0.4); cursor: move; display: flex; align-items: center; gap: 10px; user-select: none;">
                 <div id="aw-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #6b7280; box-shadow: 0 0 8px rgba(107,114,128,0.5); transition: all .2s;"></div>
                 <div style="font-weight: 700; color: #10b981; font-size: 13px; letter-spacing: .02em; flex: 1;">Alt Manager Worker</div>
-                <div style="font-size: 10px; color: #71717a; font-variant-numeric: tabular-nums;">v1.0.8</div>
+                <div style="font-size: 10px; color: #71717a; font-variant-numeric: tabular-nums;">v1.0.9</div>
             </div>
             <div style="padding: 12px;">
                 <div class="aw-row" style="margin-bottom: 8px;">

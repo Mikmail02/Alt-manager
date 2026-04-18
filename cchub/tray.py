@@ -336,10 +336,17 @@ def _extract_host(url: str) -> str:
 
 
 def _open_logs() -> None:
-    try:
-        import subprocess
+    import subprocess
+    import sys
 
-        subprocess.Popen(["explorer", str(paths.LOG_DIR)])
+    path = str(paths.LOG_DIR)
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", path])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
     except Exception:
         pass
 

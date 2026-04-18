@@ -2,10 +2,13 @@
 
 On startup we poll the latest release. If its tag is newer than the installed
 version, the tray UI blocks everything with a modal whose only action is to
-download + launch the new installer silently. Network failures are non-fatal so
-users aren't locked out by GitHub outages.
+download + launch the new installer. On Windows the Inno Setup installer
+runs silently; on macOS we open the .dmg in Finder and quit so the user can
+drag-replace the .app. Network failures are non-fatal so users aren't locked
+out by GitHub outages.
 """
 import json
+import os
 import re
 import ssl
 import subprocess
@@ -17,6 +20,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from .version import GITHUB_OWNER, GITHUB_REPO, __version__
+
+# Release-asset suffix we look for on the current platform.
+_ASSET_EXT = ".dmg" if sys.platform == "darwin" else ".exe"
 
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
@@ -62,14 +68,16 @@ def fetch_latest(timeout: float = 10.0) -> Optional[ReleaseInfo]:
         return None
 
     installer_url = None
+    # Prefer an asset whose name contains "setup" for Windows or "cchub" for mac.
+    preferred_kw = "setup" if _ASSET_EXT == ".exe" else "cchub"
     for asset in payload.get("assets") or []:
         name = (asset.get("name") or "").lower()
-        if name.endswith(".exe") and "setup" in name:
+        if name.endswith(_ASSET_EXT) and preferred_kw in name:
             installer_url = asset.get("browser_download_url")
             break
     if installer_url is None:
         for asset in payload.get("assets") or []:
-            if (asset.get("name") or "").lower().endswith(".exe"):
+            if (asset.get("name") or "").lower().endswith(_ASSET_EXT):
                 installer_url = asset.get("browser_download_url")
                 break
 
@@ -120,7 +128,8 @@ def fetch_commits_between(old_tag: str, new_tag: str, timeout: float = 10.0) -> 
 def download_installer(release: ReleaseInfo) -> Optional[Path]:
     if not release.installer_url:
         return None
-    tmp = Path(tempfile.gettempdir()) / f"CCHub-Setup-{release.tag}.exe"
+    filename = f"CCHub-Setup-{release.tag}{_ASSET_EXT}"
+    tmp = Path(tempfile.gettempdir()) / filename
     req = urllib.request.Request(release.installer_url, headers={"User-Agent": f"CCHub/{__version__}"})
     try:
         with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as f:
@@ -135,18 +144,21 @@ def download_installer(release: ReleaseInfo) -> Optional[Path]:
 
 
 def launch_installer_and_exit(installer: Path) -> None:
-    """Fire-and-forget launch of the installer, then terminate current process.
+    """Launch the installer asset, then terminate current process.
 
-    Inno Setup installer flags:
-      /SILENT        — minimal UI, progress only
-      /CLOSEAPPLICATIONS — ask the installer to close running instances
-      /RESTARTAPPLICATIONS — relaunch after install
+    Windows: Inno Setup installer runs silently and restarts the app.
+    macOS:   `open` the .dmg in Finder so the user drag-replaces CCHub.app;
+             the app quits so the old copy isn't held open.
     """
     try:
-        subprocess.Popen(
-            [str(installer), "/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"],
-            close_fds=True,
-            creationflags=0x00000008 if sys.platform == "win32" else 0,  # DETACHED_PROCESS
-        )
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(installer)], close_fds=True)
+        else:
+            subprocess.Popen(
+                [str(installer), "/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"],
+                close_fds=True,
+                creationflags=0x00000008 if sys.platform == "win32" else 0,  # DETACHED_PROCESS
+            )
     finally:
-        sys.exit(0)
+        # On mac we want to fully exit so a newly-dragged app can launch cleanly.
+        os._exit(0) if sys.platform == "darwin" else sys.exit(0)

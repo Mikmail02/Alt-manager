@@ -2,7 +2,7 @@
 
 Tailscale assigns every node a stable IPv4 in the CGNAT range 100.64.0.0/10.
 We try the official CLI first (works even if Tailscale isn't in PATH on
-standard Windows installs), then fall back to enumerating local interfaces.
+standard Windows/macOS installs), then fall back to enumerating local interfaces.
 """
 import ipaddress
 import os
@@ -14,8 +14,15 @@ _CGNAT = ipaddress.ip_network("100.64.0.0/10")
 _NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — prevents console flash on Windows.
 
 _TS_PATHS = (
+    # Windows
     r"C:\Program Files\Tailscale\tailscale.exe",
     r"C:\Program Files (x86)\Tailscale\tailscale.exe",
+    # macOS (App Store build and standalone build both drop a CLI here)
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    "/usr/local/bin/tailscale",
+    "/opt/homebrew/bin/tailscale",
+    # Linux
+    "/usr/bin/tailscale",
 )
 
 

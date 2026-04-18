@@ -6,7 +6,7 @@ on:
       - "v*.*.*"
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
     permissions:
       contents: write
@@ -41,6 +41,58 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: installer/Output/CCHub-Setup-*.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+  build-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Generate icons
+        run: python tools/make_icon.py
+
+      - name: Build CCHub.app
+        run: python -m PyInstaller build_mac.spec --noconfirm --clean
+
+      - name: Ad-hoc sign bundle
+        # Unsigned bundles from PyInstaller can fail to launch with
+        # "damaged and can't be opened" on Apple Silicon. An ad-hoc signature
+        # satisfies the loader; users still see the Gatekeeper prompt on
+        # first open (right-click → Open) because we aren't notarised.
+        run: codesign --force --deep --sign - dist/CCHub.app
+
+      - name: Package DMG
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUT="dist/CCHub-${VERSION}.dmg"
+          mkdir -p dmg-staging
+          cp -R dist/CCHub.app dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "Case Clicker Hub" \
+            -srcfolder dmg-staging \
+            -ov -format UDZO \
+            "$OUT"
+          echo "DMG=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload DMG to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DMG }}
           draft: false
           prerelease: false
           generate_release_notes: true
