@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CC Hub Main Worker
 // @namespace    https://github.com/Mikmail02/Alt-manager
-// @version      1.0.9
+// @version      1.1.0
 // @description  Main worker for Case Clicker Hub desktop app
 // @author       Mikmail
 // @match        *://*.case-clicker.com/*

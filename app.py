@@ -32,6 +32,20 @@ def api_ping():
     return jsonify({"ok": True, "version": __version__})
 
 
+@app.route("/api/remote_url", methods=["GET", "POST"])
+def api_remote_url():
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        normalized = network.normalize_remote_url(data.get("url") or "", PORT)
+        app_config.set_public_url(normalized)
+        return jsonify({"ok": True, "url": app_config.public_url()})
+    return jsonify({
+        "url": app_config.public_url(),
+        "detected": network.detect_tailscale_ip() or "",
+        "port": PORT,
+    })
+
+
 @app.route("/config")
 def panel_config():
     base = network.worker_base_url(app_config.public_url(), PORT)
@@ -233,7 +247,7 @@ def skin_action():
     save_db(db)
     return jsonify({"success": True})
 
-# --- VIKTIGSTE ENDRING I v5.2: AUTO-TRIGGER MAIN ACCOUNT ---
+# --- Auto-trigger: when an alt posts a trade link, queue the main to join it. ---
 @app.route('/api/log_status', methods=['POST'])
 def log_status():
     data = request.json
@@ -922,99 +936,163 @@ HTML_UI = """
         });
       })();
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-dark: #09090b;
-            --bg-panel: #18181b;
-            --border: #27272a;
+            --bg-panel: #101013;
+            --bg-elev: #15151a;
+            --bg-hover: #1c1c22;
+            --border: #24242a;
+            --border-soft: #1d1d23;
             --primary: #f43f5e;
             --accent: #10b981;
+            --accent-soft: rgba(16, 185, 129, 0.12);
+            --warn: #eab308;
+            --info: #60a5fa;
             --danger: #ef4444;
             --text-main: #e4e4e7;
             --text-muted: #a1a1aa;
+            --text-dim: #71717a;
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.35);
+            --shadow-lg: 0 10px 40px rgba(0,0,0,0.5);
         }
-        
-        body { background: var(--bg-dark); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+
+        * { box-sizing: border-box; }
+        body { background: var(--bg-dark); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; font-feature-settings: 'cv11','ss01'; }
+        button { font-family: inherit; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #2a2a30; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3a3a42; }
 
         #nprogress .bar { background: var(--accent); position: fixed; z-index: 9999; top: 0; left: 0; width: 0%; height: 2px; transition: width 0.2s ease; box-shadow: 0 0 10px var(--accent); }
 
-        /* SIDEBAR */
-        .sidebar { width: 320px; flex: 0 0 320px; background: #000; border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 0; z-index: 10; user-select: none; transition: flex-basis .15s ease, width .15s ease; }
+        /* ---------- SIDEBAR ---------- */
+        .sidebar { width: 320px; flex: 0 0 320px; background: #07070a; border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; padding: 18px 0 0; z-index: 10; user-select: none; transition: flex-basis .15s ease, width .15s ease; }
         @media (max-width: 1120px) {
-            .sidebar { width: 260px; flex-basis: 260px; }
+            .sidebar { width: 280px; flex-basis: 280px; }
         }
         @media (max-width: 900px) {
-            .sidebar { width: 220px; flex-basis: 220px; }
-            .brand { padding: 0 14px 16px 14px; font-size: 14px; }
+            .sidebar { width: 240px; flex-basis: 240px; }
+            .brand { padding: 0 14px 14px 14px; font-size: 14px; }
             .settings-area { padding: 14px; }
         }
-        .brand { padding: 0 24px 20px 24px; font-weight: 800; font-size: 16px; letter-spacing: -0.5px; color: #fff; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); margin-bottom: 10px; cursor: pointer; }
-        .brand-title span { color: var(--accent); }
-        
-        .edit-btn { background: #222; border: 1px solid #333; color: #666; font-size: 10px; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: 700; transition: 0.2s; }
-        .edit-btn:hover { color: #fff; border-color: #555; }
-        .edit-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
-        .acc-list { flex: 1; overflow-y: auto; padding: 0 12px; }
-        
-        /* LIST ITEM & STATUS COLORS */
-        .acc-item { padding: 12px; margin-bottom: 6px; border-radius: 8px; cursor: pointer; display: flex; gap: 12px; transition: 0.15s; border: 1px solid transparent; background: #09090b; position: relative; }
-        
-        /* Background colors based on status */
-        .bg-online { background: rgba(16, 185, 129, 0.08) !important; border-color: rgba(16, 185, 129, 0.2) !important; }
-        .bg-offline { background: rgba(239, 68, 68, 0.08) !important; border-color: rgba(239, 68, 68, 0.2) !important; }
+        .brand { padding: 0 20px 16px 20px; font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: #fff; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-soft); margin-bottom: 10px; }
+        .brand-title { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .brand-title .logo { display: inline-flex; width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent) 0%, #059669 100%); align-items: center; justify-content: center; color: #04110a; font-weight: 900; font-size: 12px; box-shadow: 0 4px 10px rgba(16,185,129,0.25); }
+        .edit-btn { background: transparent; border: 1px solid var(--border); color: var(--text-muted); font-size: 10px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 700; transition: 0.15s; letter-spacing: 0.3px; }
+        .edit-btn:hover { color: #fff; border-color: #3a3a42; background: var(--bg-elev); }
+        .edit-btn.active { background: var(--accent); color: #04110a; border-color: var(--accent); }
 
-        .acc-item:hover { background: #161616; border-color: #333; }
-        .bg-online:hover { background: rgba(16, 185, 129, 0.15) !important; }
-        .bg-offline:hover { background: rgba(239, 68, 68, 0.15) !important; }
+        /* Search + filter row */
+        .sidebar-controls { padding: 0 16px 10px; display: flex; gap: 6px; }
+        .sidebar-search { flex: 1; position: relative; }
+        .sidebar-search input { width: 100%; background: var(--bg-elev); border: 1px solid var(--border-soft); color: #fff; padding: 8px 10px 8px 30px; border-radius: var(--radius-sm); font-size: 12px; outline: none; transition: border-color 0.15s; }
+        .sidebar-search input:focus { border-color: #3a3a42; }
+        .sidebar-search::before { content: ''; position: absolute; top: 50%; left: 10px; transform: translateY(-50%); width: 12px; height: 12px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") no-repeat center/contain; pointer-events: none; }
+        .sidebar-filter { background: var(--bg-elev); border: 1px solid var(--border-soft); color: var(--text-muted); padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; font-weight: 700; transition: 0.15s; }
+        .sidebar-filter:hover { color: #fff; border-color: #3a3a42; }
+        .sidebar-filter.active { background: var(--accent-soft); color: var(--accent); border-color: rgba(16,185,129,0.35); }
 
-        .acc-item.active { background: #161618; border-color: var(--accent); }
+        /* Bulk-action toolbar (visible only in edit mode with selection) */
+        .bulk-bar { margin: 0 12px 10px; padding: 10px 12px; background: linear-gradient(135deg, rgba(16,185,129,0.06), rgba(16,185,129,0.02)); border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-md); display: none; align-items: center; justify-content: space-between; gap: 8px; }
+        .bulk-bar.show { display: flex; animation: fadein 0.2s; }
+        .bulk-bar-count { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0.3px; }
+        .bulk-bar-actions { display: flex; gap: 6px; }
+        .bulk-btn { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 5px 9px; border-radius: var(--radius-sm); cursor: pointer; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; transition: 0.15s; }
+        .bulk-btn:hover { color: #fff; border-color: #3a3a42; background: var(--bg-elev); }
+        .bulk-btn.danger:hover { color: var(--danger); border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); }
+        .bulk-btn.primary { background: var(--accent); color: #04110a; border-color: var(--accent); }
+        .bulk-btn.primary:hover { background: #22d39a; color: #04110a; border-color: #22d39a; }
+
+        .edit-hint { margin: 0 12px 8px; padding: 8px 10px; font-size: 10px; color: var(--text-dim); background: var(--bg-elev); border: 1px dashed var(--border); border-radius: var(--radius-sm); line-height: 1.4; display: none; }
+        .edit-hint.show { display: block; }
+
+        .acc-list { flex: 1; overflow-y: auto; padding: 0 10px; }
+
+        /* ---------- LIST ITEM ---------- */
+        .acc-item { padding: 10px 12px; margin-bottom: 4px; border-radius: var(--radius-md); cursor: pointer; display: flex; gap: 11px; transition: background 0.12s, border-color 0.12s; border: 1px solid transparent; background: transparent; position: relative; align-items: center; }
+        .acc-item:hover { background: var(--bg-elev); }
+        .acc-item.active { background: var(--bg-elev); border-color: rgba(16,185,129,0.45); box-shadow: inset 2px 0 0 var(--accent); }
         .acc-item.draggable { cursor: grab; }
+        .acc-item.draggable:active { cursor: grabbing; }
         .acc-item.dragging { opacity: 0.5; border: 1px dashed #555; }
-        
-        .main-separator { height: 1px; background: #333; margin: 10px 12px; }
-        .acc-item.pinned { border-left: 2px solid #eab308; }
+        .acc-item.selected { background: var(--accent-soft); border-color: rgba(16,185,129,0.35); }
+        .acc-item.hidden-filtered { display: none; }
 
-        .acc-avatar { width: 42px; height: 42px; border-radius: 8px; background: #222; object-fit: cover; flex-shrink: 0; }
-        .acc-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
-        .acc-name { font-weight: 700; font-size: 14px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        
-        .badge-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-        .pro-tag { background: #eab308; color: #000; font-size: 9px; padding: 2px 4px; border-radius: 3px; font-weight: 900; line-height: 1; display: inline-block; }
-        .prem-tag { transform: skew(-10deg); padding: 2px 6px; display: inline-flex; align-items: center; gap: 4px; border-radius: 2px; }
+        .main-separator { height: 1px; background: var(--border-soft); margin: 8px 12px; }
+        .acc-item.pinned { box-shadow: inset 2px 0 0 var(--warn); }
+        .acc-item.pinned.active { box-shadow: inset 2px 0 0 var(--warn), inset 0 0 0 1px rgba(16,185,129,0.45); }
+
+        .acc-check { width: 18px; height: 18px; flex-shrink: 0; display: none; align-items: center; justify-content: center; border: 1.5px solid var(--border); border-radius: 4px; background: var(--bg-elev); transition: 0.15s; }
+        .acc-check.show { display: flex; }
+        .acc-check.checked { background: var(--accent); border-color: var(--accent); }
+        .acc-check.checked::after { content: '✓'; color: #04110a; font-size: 11px; font-weight: 900; line-height: 1; }
+
+        .acc-drag-handle { display: none; width: 14px; flex-shrink: 0; color: var(--text-dim); font-size: 14px; cursor: grab; line-height: 1; user-select: none; }
+        .acc-drag-handle.show { display: flex; align-items: center; }
+
+        .acc-avatar-wrap { position: relative; flex-shrink: 0; }
+        .acc-avatar { width: 38px; height: 38px; border-radius: var(--radius-md); background: #222; object-fit: cover; display: block; border: 1px solid var(--border-soft); }
+        .avatar-status { position: absolute; bottom: -2px; right: -2px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #07070a; background: var(--danger); }
+        .avatar-status.online { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+        .acc-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+        .acc-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .acc-name { font-weight: 600; font-size: 13px; color: #fafafa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.2px; }
+        .main-tag { background: var(--warn); color: #111; font-size: 8px; padding: 2px 5px; border-radius: 3px; font-weight: 900; line-height: 1; letter-spacing: 0.4px; flex-shrink: 0; }
+
+        .badge-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+        .pro-tag { background: var(--warn); color: #111; font-size: 8px; padding: 2px 4px; border-radius: 3px; font-weight: 900; line-height: 1; display: inline-block; letter-spacing: 0.3px; }
+        .prem-tag { transform: skew(-10deg); padding: 2px 5px; display: inline-flex; align-items: center; gap: 4px; border-radius: 2px; }
         .prem-stripes { display: flex; gap: 2px; }
-        .prem-stripe { width: 3px; height: 10px; background: currentColor; }
-        .prem-val { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 10px; line-height: 1; transform: skew(0deg); color: inherit; }
+        .prem-stripe { width: 2px; height: 9px; background: currentColor; }
+        .prem-val { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 9px; line-height: 1; transform: skew(0deg); color: inherit; }
 
-        .acc-status { font-size: 11px; font-weight: 500; display: flex; align-items: center; gap: 6px; margin-top: 2px; }
-        .status-dot { width: 6px; height: 6px; border-radius: 50%; }
-        .dot-online { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
-        .dot-offline { background: var(--danger); }
-        .status-text-online { color: var(--accent); }
-        .status-text-offline { color: var(--danger); }
+        .acc-meta { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono'; font-weight: 500; display: flex; align-items: center; gap: 8px; margin-top: 1px; }
+        .acc-meta span { white-space: nowrap; }
+        .acc-meta .mm { color: var(--accent); }
+        .acc-meta .mt { color: var(--warn); }
 
-        .settings-area { padding: 20px; border-top: 1px solid var(--border); }
-        .settings-input { background: #111; border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; font-size: 11px; margin-bottom: 8px; font-family: 'JetBrains Mono'; }
-        .save-btn { width: 100%; background: #fff; color: #000; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: 800; font-size: 10px; transition: 0.2s; letter-spacing: 0.5px; }
-        .copy-link-btn { width: 100%; background: transparent; color: #a1a1aa; border: 1px solid #27272a; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 10px; letter-spacing: 0.5px; margin-top: 6px; transition: background 0.15s, color 0.15s, border-color 0.15s; }
-        .copy-link-btn:hover { background: #18181b; color: #fafafa; border-color: #3f3f46; }
-        .copy-link-btn.copied { background: #10b981; color: #052e1a; border-color: #10b981; }
+        .acc-quick-delete { display: none; background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px; border-radius: 4px; font-size: 14px; line-height: 1; transition: 0.15s; flex-shrink: 0; }
+        .acc-quick-delete.show { display: inline-flex; align-items: center; justify-content: center; }
+        .acc-quick-delete:hover { color: var(--danger); background: rgba(239,68,68,0.08); }
 
-        /* MAIN CONTENT AREA */
+        .acc-empty { padding: 40px 20px; text-align: center; color: var(--text-dim); font-size: 12px; }
+
+        /* ---------- SETTINGS AREA ---------- */
+        .settings-area { padding: 16px 18px; border-top: 1px solid var(--border-soft); background: #05050799; }
+        .settings-label { font-size: 9px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+        .settings-label + input { margin-bottom: 10px; }
+        .settings-input { background: var(--bg-elev); border: 1px solid var(--border-soft); color: #fff; padding: 9px 11px; border-radius: var(--radius-sm); width: 100%; font-size: 11px; font-family: 'JetBrains Mono'; outline: none; transition: border-color 0.15s; }
+        .settings-input:focus { border-color: #3a3a42; }
+        .hint-text { font-size: 9px; color: var(--text-dim); margin-top: -6px; margin-bottom: 10px; min-height: 11px; line-height: 1.3; }
+        .save-btn { width: 100%; background: #fafafa; color: #000; border: none; padding: 10px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 800; font-size: 10px; transition: background 0.15s; letter-spacing: 0.6px; }
+        .save-btn:hover { background: #fff; }
+        .copy-link-btn { width: 100%; background: transparent; color: var(--text-muted); border: 1px solid var(--border); padding: 9px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 700; font-size: 10px; letter-spacing: 0.6px; margin-top: 6px; transition: 0.15s; }
+        .copy-link-btn:hover { background: var(--bg-elev); color: #fafafa; border-color: #3a3a42; }
+        .copy-link-btn.copied { background: var(--accent); color: #04110a; border-color: var(--accent); }
+
+        /* ---------- MAIN CONTENT AREA ---------- */
         .main { flex: 1; display: flex; flex-direction: column; background: var(--bg-dark); position: relative; overflow: hidden; }
         
-        /* GLOBAL HEADER */
+        /* ---------- GLOBAL HEADER ---------- */
         .global-header {
             flex: 0 0 auto;
-            min-height: 50px;
-            background: rgba(24, 24, 27, 0.8);
-            border-bottom: 1px solid var(--border);
+            min-height: 56px;
+            background: rgba(7,7,10,0.85);
+            border-bottom: 1px solid var(--border-soft);
             display: flex;
             align-items: center;
             gap: 14px;
-            padding: 8px 16px;
-            backdrop-filter: blur(10px);
+            padding: 8px 20px;
+            backdrop-filter: blur(14px);
             position: relative;
             z-index: 20;
         }
@@ -1022,297 +1100,275 @@ HTML_UI = """
             display: flex;
             flex: 1 1 auto;
             min-width: 0;
-            gap: 20px;
+            gap: 10px;
             align-items: center;
-            justify-content: space-around;
             overflow: hidden;
         }
         .gh-item {
-            display: flex; flex-direction: column; align-items: center;
-            min-width: 0;
+            flex: 1; min-width: 0;
+            display: flex; flex-direction: column;
+            padding: 7px 14px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-md);
+            gap: 2px;
+            transition: border-color 0.15s;
         }
+        .gh-item:hover { border-color: var(--border); }
         .gh-label {
-            font-size: 9px; color: #666; font-weight: 700;
-            text-transform: uppercase; letter-spacing: 0.5px;
+            font-size: 9px; color: var(--text-dim); font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.6px;
             white-space: nowrap;
         }
         .gh-val {
-            font-size: 13px; color: #fff; font-family: 'JetBrains Mono';
+            font-size: 14px; color: #fff; font-family: 'JetBrains Mono';
             font-weight: 600; white-space: nowrap;
             overflow: hidden; text-overflow: ellipsis; max-width: 100%;
         }
-        .gh-val.tok { color: #eab308; }
+        .gh-val.tok { color: var(--warn); }
         .gh-val.mon { color: var(--accent); }
 
-        /* ACTIVE JOBS BUTTON — now a regular flex child, no absolute positioning. */
         .active-jobs-wrap { position: relative; flex: 0 0 auto; }
         .active-jobs-btn {
-            background: var(--accent);
-            color: #000;
-            border: none;
-            padding: 8px 14px;
-            border-radius: 6px;
-            font-weight: 700;
+            background: var(--bg-panel);
+            color: #fff;
+            border: 1px solid var(--border);
+            padding: 9px 14px;
+            border-radius: var(--radius-md);
+            font-weight: 600;
             font-size: 11px;
             cursor: pointer;
-            transition: background .15s, transform .15s;
+            transition: 0.15s;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             white-space: nowrap;
+            letter-spacing: 0.2px;
         }
-        .active-jobs-btn:hover { background: #0ea5e9; transform: scale(1.03); }
+        .active-jobs-btn:hover { background: var(--bg-elev); border-color: #3a3a42; }
+        .active-jobs-btn.has-active { border-color: rgba(16,185,129,0.4); color: var(--accent); }
+        .active-jobs-btn.has-alert { border-color: rgba(239,68,68,0.4); color: var(--danger); }
         .active-jobs-btn .badge {
-            background: rgba(0,0,0,0.3);
+            background: var(--bg-elev);
             border-radius: 10px;
-            padding: 2px 6px;
+            padding: 2px 7px;
             font-size: 10px;
             min-width: 18px;
             text-align: center;
+            font-weight: 700;
         }
+        .active-jobs-btn.has-active .badge { background: var(--accent); color: #04110a; }
+        .active-jobs-btn.has-alert #activeJobsAlertBadge { background: var(--danger); color: #fff; }
         .active-jobs-btn .badge:empty,
         .active-jobs-btn .badge[data-zero="1"] { display: none; }
         .active-jobs-btn-label { display: inline; }
 
-        /* Compact the stats when width gets tight. */
         @media (max-width: 1120px) {
-            .gh-stats { gap: 14px; }
+            .gh-stats { gap: 6px; }
             .gh-val { font-size: 12px; }
-            .gh-label { font-size: 8px; }
+            .gh-item { padding: 6px 10px; }
         }
         @media (max-width: 960px) {
-            .global-header { padding: 6px 12px; gap: 10px; }
-            .gh-stats { gap: 10px; }
+            .global-header { padding: 6px 14px; gap: 8px; }
             .gh-label { display: none; }
             .gh-item::before {
                 content: attr(data-short);
-                font-size: 8px; color: #555; font-weight: 800;
+                font-size: 9px; color: var(--text-dim); font-weight: 800;
                 text-transform: uppercase; margin-right: 4px;
             }
-            .gh-item { flex-direction: row; align-items: baseline; gap: 4px; }
+            .gh-item { flex-direction: row; align-items: baseline; gap: 5px; padding: 6px 9px; }
             .active-jobs-btn-label { display: none; }
             .active-jobs-btn { padding: 8px 10px; }
         }
 
-        /* ACTIVE JOBS DROPDOWN — anchored to button so it moves with the header. */
+        /* ---------- ACTIVE JOBS DROPDOWN ---------- */
         .active-jobs-dropdown {
             position: absolute;
             top: calc(100% + 8px);
             right: 0;
-            width: min(500px, calc(100vw - 40px));
+            width: min(520px, calc(100vw - 40px));
             max-height: calc(100vh - 140px);
             background: var(--bg-panel);
             border: 1px solid var(--border);
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
             z-index: 10000;
             display: none;
             flex-direction: column;
             overflow: hidden;
         }
-        .active-jobs-dropdown.show { display: flex; }
+        .active-jobs-dropdown.show { display: flex; animation: fadein 0.15s; }
         .active-jobs-header {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border);
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-soft);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
         .active-jobs-header h3 {
             margin: 0;
-            font-size: 14px;
-            font-weight: 700;
-            color: #fff;
-        }
-        .active-jobs-list {
-            overflow-y: auto;
-            max-height: 500px;
-        }
-        .active-job-item {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border);
-            transition: 0.2s;
-        }
-        .active-job-item:hover { background: rgba(255,255,255,0.02); }
-        .active-job-item.done { opacity: 0.7; }
-        .active-job-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .active-job-user {
-            font-weight: 700;
-            color: #fff;
             font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.2px;
         }
-        .active-job-type {
-            font-size: 11px;
-            color: var(--accent);
-            font-weight: 600;
-        }
-        .active-job-close {
-            background: transparent;
-            border: none;
-            color: #666;
-            cursor: pointer;
-            font-size: 16px;
-            padding: 0;
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: 0.2s;
-        }
-        .active-job-close:hover { color: #fff; }
-        .active-job-progress {
-            margin-top: 8px;
-        }
-        .active-job-progress-bar {
-            background: #111;
-            border-radius: 6px;
-            padding: 2px;
-            height: 20px;
-            overflow: hidden;
-            position: relative;
-        }
-        .active-job-progress-fill {
-            background: linear-gradient(90deg, var(--accent) 0%, #0f0 100%);
-            height: 100%;
-            border-radius: 4px;
-            transition: width 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #000;
-            font-weight: 800;
-            font-size: 10px;
-        }
-        .active-job-stats {
-            display: flex;
-            justify-content: space-between;
-            font-size: 10px;
-            color: #888;
-            font-family: 'JetBrains Mono';
-            margin-top: 6px;
-        }
+        .active-jobs-list { overflow-y: auto; max-height: 520px; }
+        .active-job-item { padding: 14px 18px; border-bottom: 1px solid var(--border-soft); transition: 0.15s; }
+        .active-job-item:last-child { border-bottom: none; }
+        .active-job-item:hover { background: var(--bg-elev); }
+        .active-job-item.done { opacity: 0.75; }
+        .active-job-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .active-job-user { font-weight: 700; color: #fff; font-size: 13px; }
+        .active-job-type { font-size: 10px; color: var(--accent); font-weight: 600; letter-spacing: 0.3px; margin-top: 2px; }
+        .active-job-close { background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 16px; padding: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: 0.15s; }
+        .active-job-close:hover { color: #fff; background: var(--bg-elev); }
+        .active-job-progress { margin-top: 8px; }
+        .active-job-progress-bar { background: var(--bg-dark); border-radius: var(--radius-sm); padding: 2px; height: 22px; overflow: hidden; position: relative; }
+        .active-job-progress-fill { background: linear-gradient(90deg, var(--accent) 0%, #34d399 100%); height: 100%; border-radius: 4px; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: #04110a; font-weight: 800; font-size: 10px; }
+        .active-job-stats { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono'; margin-top: 6px; flex-wrap: wrap; gap: 8px; }
 
-        .top-bar { min-height: 70px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 8px 24px; background: rgba(9,9,11,0.5); backdrop-filter: blur(20px); z-index: 10; gap: 16px; flex-wrap: wrap; }
-        .user-head { display: flex; align-items: center; gap: 15px; min-width: 0; }
-        .uh-avatar { width: 42px; height: 42px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; flex-shrink: 0; }
+        /* ---------- TOP BAR (account detail) ---------- */
+        .top-bar { min-height: 64px; border-bottom: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between; padding: 10px 24px; background: rgba(9,9,11,0.55); backdrop-filter: blur(20px); z-index: 10; gap: 16px; flex-wrap: wrap; }
+        .user-head { display: flex; align-items: center; gap: 13px; min-width: 0; }
+        .uh-avatar { width: 42px; height: 42px; border-radius: var(--radius-md); border: 1px solid var(--border-soft); object-fit: cover; flex-shrink: 0; }
         .uh-meta { min-width: 0; }
-        .uh-meta h1 { font-size: 16px; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .uh-meta p { font-size: 11px; color: var(--text-muted); margin: 2px 0 0 0; font-family: 'JetBrains Mono'; }
+        .uh-meta h1 { font-size: 15px; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.3px; }
+        .uh-meta p { font-size: 10px; color: var(--text-dim); margin: 3px 0 0 0; font-family: 'JetBrains Mono'; }
 
-        .tabs { display: flex; gap: 20px; height: 100%; flex-wrap: wrap; align-items: center; }
-        .tab { height: 42px; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: 0.2s; box-sizing: border-box; white-space: nowrap; }
-        .tab:hover { color: #fff; }
-        .tab.active { color: #fff; border-bottom-color: var(--accent); }
+        .tabs { display: flex; gap: 4px; height: 100%; flex-wrap: wrap; align-items: center; }
+        .tab { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-radius: var(--radius-sm); transition: 0.15s; white-space: nowrap; letter-spacing: 0.1px; }
+        .tab:hover { color: #fff; background: var(--bg-elev); }
+        .tab.active { color: #fff; background: var(--bg-elev); box-shadow: inset 0 -2px 0 var(--accent); }
+
+        .unlink-btn { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 7px 13px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 11px; transition: 0.15s; letter-spacing: 0.2px; }
+        .unlink-btn:hover { background: rgba(239,68,68,0.08); color: var(--danger); border-color: rgba(239,68,68,0.4); }
 
         @media (max-width: 1120px) {
-            .tabs { gap: 14px; }
-            .tab { font-size: 12px; }
+            .tabs { gap: 2px; }
+            .tab { padding: 7px 10px; font-size: 11px; }
         }
         @media (max-width: 900px) {
             .top-bar { padding: 8px 14px; gap: 10px; }
-            .tabs { gap: 10px; width: 100%; order: 3; overflow-x: auto; }
+            .tabs { gap: 2px; width: 100%; order: 3; overflow-x: auto; }
             .tabs::-webkit-scrollbar { height: 4px; }
             .tabs::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
         }
 
-        .content { flex: 1; padding: 32px; overflow-y: auto; display: none; }
-        .content.active { display: block; animation: fadein 0.3s; }
+        .content { flex: 1; padding: 28px 32px; overflow-y: auto; display: none; }
+        .content.active { display: block; animation: fadein 0.25s; }
         @media (max-width: 1120px) { .content { padding: 22px; } }
         @media (max-width: 900px) { .content { padding: 14px; } }
-        @keyframes fadein { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .content h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 20px; color: #fff; }
+        @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse {
             0% { transform: translateX(-40%); opacity: 0.75; }
             50% { transform: translateX(30%); opacity: 1; }
             100% { transform: translateX(110%); opacity: 0.75; }
         }
 
-        /* OVERVIEW DASHBOARD */
-        .overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
+        /* ---------- OVERVIEW ---------- */
+        .overview-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 16px; flex-wrap: wrap; }
+        .overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
         .ov-card {
-            background: #111;
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 20px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-lg);
+            padding: 16px;
             display: flex;
             align-items: center;
-            gap: 15px;
-            transition: 0.2s;
+            gap: 13px;
+            transition: 0.15s;
             cursor: pointer;
+            position: relative;
         }
-        .ov-card:hover { border-color: #444; background: #161616; transform: translateY(-2px); }
-        .ov-avatar { width: 50px; height: 50px; border-radius: 10px; object-fit: cover; border: 1px solid #333; }
+        .ov-card:hover { border-color: var(--border); background: var(--bg-elev); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+        .ov-avatar-wrap { position: relative; flex-shrink: 0; }
+        .ov-avatar { width: 46px; height: 46px; border-radius: var(--radius-md); object-fit: cover; border: 1px solid var(--border-soft); background: #222; }
         .ov-meta { flex: 1; min-width: 0; }
-        .ov-name { font-weight: 700; color: #fff; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .ov-stats { display: flex; gap: 10px; font-family: 'JetBrains Mono'; font-size: 11px; }
-        .ov-stat { display: flex; align-items: center; gap: 4px; }
+        .ov-name { font-weight: 600; color: #fff; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; letter-spacing: -0.2px; }
+        .ov-stats { display: flex; gap: 10px; font-family: 'JetBrains Mono'; font-size: 11px; margin-top: 4px; }
+        .ov-stat { display: flex; align-items: center; gap: 3px; }
+        .ov-empty { grid-column: 1/-1; padding: 60px 20px; text-align: center; color: var(--text-dim); font-size: 13px; border: 1px dashed var(--border); border-radius: var(--radius-lg); }
 
-        /* USER DASHBOARD */
-        .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 24px; }
+        /* ---------- DASHBOARD STATS ---------- */
+        .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
         @media (max-width: 900px) { .dash-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; } }
-        .stat-box { background: var(--bg-panel); border: 1px solid var(--border); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
-        .sb-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-        .sb-val { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; }
-        .sb-sub { font-size: 11px; color: #555; }
+        .stat-box { background: var(--bg-panel); border: 1px solid var(--border-soft); padding: 16px 18px; border-radius: var(--radius-lg); display: flex; flex-direction: column; gap: 6px; transition: border-color 0.15s; }
+        .stat-box:hover { border-color: var(--border); }
+        .sb-label { font-size: 9px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px; }
+        .sb-val { font-size: 19px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -0.3px; }
+        .sb-sub { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono'; }
 
-        /* INVENTORY CARD DESIGN */
-        .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
-        .skin-card { 
-            background: #111; 
-            border: 1px solid var(--border); 
-            border-radius: 8px; 
-            padding: 10px; 
-            position: relative; 
-            overflow: hidden; 
-            transition: 0.2s;
+        /* ---------- INVENTORY ---------- */
+        .inv-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+        .inv-toolbar-right { display: flex; align-items: center; gap: 12px; }
+        .inv-count-pill { background: var(--bg-panel); border: 1px solid var(--border-soft); padding: 7px 12px; border-radius: var(--radius-sm); font-family: 'JetBrains Mono'; font-size: 12px; color: #fff; font-weight: 600; }
+        .btn-accent { background: var(--accent); color: #04110a; border: none; padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 700; font-size: 11px; transition: 0.15s; letter-spacing: 0.2px; }
+        .btn-accent:hover { background: #22d39a; }
+
+        .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+        .skin-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-md);
+            padding: 10px;
+            position: relative;
+            overflow: hidden;
+            transition: 0.15s;
             display: flex;
             flex-direction: column;
         }
-        .skin-card:hover { border-color: #555; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .skin-card:hover { border-color: var(--border); transform: translateY(-1px); box-shadow: var(--shadow-md); }
 
         .skin-card.is-event::before { content: ''; position: absolute; inset: 0; background: var(--event-grad); opacity: 0.1; z-index: 0; pointer-events: none; }
         .skin-card > * { position: relative; z-index: 1; }
-        
-        .star-btn { position: absolute; top: 5px; left: 5px; cursor: pointer; font-size: 16px; color: #444; transition: 0.2s; z-index: 3; }
-        .star-btn:hover { transform: scale(1.1); }
-        .star-btn.active { color: #eab308; text-shadow: 0 0 5px rgba(234, 179, 8, 0.5); }
+
+        .star-btn { position: absolute; top: 5px; left: 5px; cursor: pointer; font-size: 15px; color: #3a3a42; transition: 0.15s; z-index: 3; }
+        .star-btn:hover { transform: scale(1.15); }
+        .star-btn.active { color: var(--warn); text-shadow: 0 0 6px rgba(234, 179, 8, 0.5); }
 
         .sticker-container { position: absolute; top: 5px; right: 5px; display: flex; flex-direction: column; gap: 2px; z-index: 2; pointer-events: none; }
         .sticker-mini { width: 22px; height: 22px; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.7)); }
 
-        .skin-img { width: 100%; height: 90px; object-fit: contain; margin-bottom: 10px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5)); margin-top: 10px; }
-        .skin-name { font-size: 11px; font-weight: 700; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+        .skin-img { width: 100%; height: 86px; object-fit: contain; margin-bottom: 8px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5)); margin-top: 8px; }
+        .skin-name { font-size: 11px; font-weight: 700; color: #e4e4e7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
         .skin-rarity-bar { height: 2px; width: 100%; position: absolute; bottom: 0; left: 0; }
-        .skin-price { font-size: 10px; color: var(--accent); font-family: 'JetBrains Mono'; margin-bottom: 8px; }
+        .skin-price { font-size: 10px; color: var(--accent); font-family: 'JetBrains Mono'; margin-bottom: 8px; font-weight: 600; }
 
-        .card-actions { display: flex; gap: 5px; margin-top: auto; border-top: 1px solid #222; padding-top: 8px; }
-        .act-btn { flex: 1; background: #222; border: 1px solid #333; color: #888; font-size: 10px; padding: 4px; border-radius: 4px; cursor: pointer; font-weight: 700; transition: 0.1s; display: flex; align-items: center; justify-content: center; }
-        .act-btn:hover { color: #fff; background: #333; }
-        .act-btn.tok { color: #eab308; border-color: rgba(234, 179, 8, 0.2); }
+        .card-actions { display: flex; gap: 4px; margin-top: auto; border-top: 1px solid var(--border-soft); padding-top: 8px; }
+        .act-btn { flex: 1; background: var(--bg-elev); border: 1px solid var(--border-soft); color: var(--text-muted); font-size: 10px; padding: 5px; border-radius: 4px; cursor: pointer; font-weight: 700; transition: 0.12s; display: flex; align-items: center; justify-content: center; }
+        .act-btn:hover { color: #fff; background: var(--bg-hover); }
+        .act-btn.tok { color: var(--warn); border-color: rgba(234, 179, 8, 0.2); }
         .act-btn.tok:hover { background: rgba(234, 179, 8, 0.1); }
         .act-btn.mon { color: var(--accent); border-color: rgba(16, 185, 129, 0.2); }
         .act-btn.mon:hover { background: rgba(16, 185, 129, 0.1); }
-        .act-btn.cpy { color: #3b82f6; border-color: rgba(59, 130, 246, 0.2); }
-        .act-btn.cpy:hover { background: rgba(59, 130, 246, 0.1); }
+        .act-btn.cpy { color: var(--info); border-color: rgba(96, 165, 250, 0.2); }
+        .act-btn.cpy:hover { background: rgba(96, 165, 250, 0.1); }
 
-        .transfer-panel { max-width: 600px; margin: 0 auto; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; padding: 40px; }
-        .chk-row { display: flex; gap: 15px; margin: 30px 0; }
-        .chk-box { flex: 1; background: #000; border: 1px solid var(--border); padding: 20px; border-radius: 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
-        .chk-box:hover { border-color: #555; }
-        .chk-box.selected { border-color: var(--accent); background: rgba(16, 185, 129, 0.05); }
-        .big-btn { width: 100%; padding: 18px; font-size: 14px; font-weight: 800; background: #fff; color: #000; border: none; border-radius: 8px; cursor: pointer; text-transform: uppercase; }
+        /* ---------- TRANSFER ---------- */
+        .transfer-panel { max-width: 560px; margin: 0 auto; background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); padding: 32px; }
+        .transfer-panel h2 { margin: 0 0 22px; text-align: center; }
+        .chk-row { display: flex; gap: 12px; margin: 0 0 18px; }
+        .chk-box { flex: 1; background: var(--bg-elev); border: 1px solid var(--border-soft); padding: 16px; border-radius: var(--radius-md); cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.15s; }
+        .chk-box:hover { border-color: var(--border); }
+        .chk-box.selected { border-color: var(--accent); background: var(--accent-soft); }
+        .big-btn { width: 100%; padding: 14px; font-size: 13px; font-weight: 800; background: #fafafa; color: #000; border: none; border-radius: var(--radius-md); cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: background 0.15s; }
+        .big-btn:hover { background: #fff; }
+
+        /* ---------- CARDS (convert, booster panels) ---------- */
+        .panel { background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); padding: 20px; }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+        .panel-title { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 0.2px; }
+        .mini-stat { background: var(--bg-elev); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px 12px; }
+        .mini-stat-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+        .mini-stat-value { color: #fff; font-weight: 800; font-family: 'JetBrains Mono'; margin-top: 4px; font-size: 13px; }
 
         .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
-        .term-win { width: 600px; background: #000; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); display: flex; flex-direction: column; overflow: hidden; }
-        .term-head { background: #111; padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        .term-body { height: 300px; padding: 20px; overflow-y: auto; font-family: 'JetBrains Mono'; font-size: 12px; color: #888; display: flex; flex-direction: column; gap: 6px; }
-        .term-foot { padding: 15px; background: #111; border-top: 1px solid var(--border); text-align: right; }
-        .trade-btn { background: var(--accent); color: #000; font-weight: 700; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 12px; display: inline-block; animation: pop 0.3s; }
+        .term-win { width: 600px; max-width: calc(100vw - 40px); background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; }
+        .term-head { background: var(--bg-elev); padding: 12px 18px; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; }
+        .term-body { height: 300px; padding: 18px; overflow-y: auto; font-family: 'JetBrains Mono'; font-size: 12px; color: var(--text-muted); display: flex; flex-direction: column; gap: 6px; }
+        .term-foot { padding: 14px; background: var(--bg-elev); border-top: 1px solid var(--border-soft); text-align: right; }
+        .trade-btn { background: var(--accent); color: #04110a; font-weight: 800; padding: 8px 16px; border-radius: var(--radius-sm); text-decoration: none; font-size: 12px; display: inline-block; letter-spacing: 0.3px; }
         .hidden { display: none !important; }
     </style>
 </head>
@@ -1332,8 +1388,8 @@ HTML_UI = """
   <div class="cc-titlebar-title" data-pywebview-drag-region><b>CC</b> Case Clicker Hub</div>
   <div class="cc-titlebar-spacer" data-pywebview-drag-region></div>
   <div class="cc-titlebar-buttons" data-no-drag>
-    <button class="cc-titlebar-btn" data-no-drag title="Minimer" onclick="cchubMinimize()">&#xE921;</button>
-    <button class="cc-titlebar-btn" data-no-drag title="Maksimer" onclick="cchubToggleMax()">&#xE922;</button>
+    <button class="cc-titlebar-btn" data-no-drag title="Minimize" onclick="cchubMinimize()">&#xE921;</button>
+    <button class="cc-titlebar-btn" data-no-drag title="Maximize" onclick="cchubToggleMax()">&#xE922;</button>
     <button class="cc-titlebar-btn cc-close" data-no-drag title="Close to tray" onclick="cchubClose()">&#xE8BB;</button>
   </div>
 </div>
@@ -1343,13 +1399,41 @@ HTML_UI = """
 
 <div class="sidebar">
     <div class="brand">
-        <div class="brand-title" onclick="goHome()"><span>⚡</span> ALT MANAGER</div>
+        <div class="brand-title" onclick="goHome()">
+            <span class="logo">CC</span>
+            <span>Case Clicker Hub</span>
+        </div>
         <button id="editBtn" class="edit-btn" onclick="toggleEditMode()">EDIT</button>
     </div>
+
+    <div class="sidebar-controls">
+        <div class="sidebar-search">
+            <input id="accSearch" type="text" placeholder="Search accounts..." oninput="filterAccounts()" autocomplete="off">
+        </div>
+        <button id="statusFilterBtn" class="sidebar-filter" onclick="cycleStatusFilter()" title="Filter by status">All</button>
+    </div>
+
+    <div id="bulkBar" class="bulk-bar">
+        <div class="bulk-bar-count"><span id="bulkSelectedCount">0</span> selected</div>
+        <div class="bulk-bar-actions">
+            <button class="bulk-btn" onclick="bulkSelectAll()">ALL</button>
+            <button class="bulk-btn" onclick="bulkClearSelection()">CLEAR</button>
+            <button class="bulk-btn" onclick="bulkSetMain()" title="Mark selected as main account">SET MAIN</button>
+            <button class="bulk-btn danger" onclick="bulkDelete()">UNLINK</button>
+        </div>
+    </div>
+
+    <div id="editHint" class="edit-hint">Click a row to select it. Drag the handle to reorder. The MAIN account is always pinned at the top.</div>
+
     <div class="acc-list" id="accList"></div>
+
     <div class="settings-area">
-        <div style="font-size:10px; font-weight:700; color:#555; margin-bottom:5px;">MAIN ACCOUNT ID</div>
-        <input id="mainId" class="settings-input" placeholder="ID...">
+        <div class="settings-label">Main Account ID</div>
+        <input id="mainId" class="settings-input" placeholder="Account ID...">
+        <div style="height:10px;"></div>
+        <div class="settings-label">Remote URL <span style="color:var(--text-dim); font-weight:500; text-transform:none; letter-spacing:0;">(optional)</span></div>
+        <input id="remoteUrl" class="settings-input" placeholder="100.x.y.z or http://100.x.y.z:5000">
+        <div id="remoteUrlHint" class="hint-text"></div>
         <button onclick="saveSettings()" class="save-btn">SAVE CONFIG</button>
         <button id="copyWorkerLinkBtn" onclick="copyWorkerLink()" class="copy-link-btn" title="Copy the link workers paste into Tampermonkey">COPY WORKER LINK</button>
         <button id="checkUpdateBtn" onclick="checkForUpdate()" class="copy-link-btn" title="Check GitHub for a newer release">CHECK FOR UPDATES</button>
@@ -1397,12 +1481,15 @@ HTML_UI = """
             <div class="tab" onclick="setTab('conv')">Convert</div>
             <div class="tab" onclick="setTab('boost')">Booster</div>
         </div>
-        <button onclick="deleteAcc()" style="background:transparent; border:1px solid #333; color:#ef4444; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:700; font-size:11px;">UNLINK</button>
+        <button onclick="deleteAcc()" class="unlink-btn">UNLINK</button>
     </div>
 
     <!-- HOME / OVERVIEW -->
     <div id="view-overview" class="content active">
-        <h2 style="margin-top:0; color:#fff;">Account Overview</h2>
+        <div class="overview-header">
+            <h2 style="margin:0;">Account Overview</h2>
+            <div id="overviewSummary" style="font-size:12px; color:var(--text-dim); font-family:'JetBrains Mono';"></div>
+        </div>
         <div class="overview-grid" id="overviewGrid"></div>
     </div>
 
@@ -1424,11 +1511,11 @@ HTML_UI = """
 
     <!-- INVENTORY -->
     <div id="view-inv" class="content">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <div class="sb-label">CACHED INVENTORY</div>
-            <div style="display:flex; align-items:center; gap:15px;">
-            <div style="font-family:'JetBrains Mono'; font-size:12px; color:#fff;"><span id="invCount">0</span> ITEMS</div>
-                <button onclick="refreshInventory()" style="background:var(--accent); color:#000; border:none; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:700; font-size:11px; transition:0.2s;">REFRESH</button>
+        <div class="inv-toolbar">
+            <h2 style="margin:0;">Inventory</h2>
+            <div class="inv-toolbar-right">
+                <div class="inv-count-pill"><span id="invCount">0</span> items</div>
+                <button onclick="refreshInventory()" class="btn-accent">REFRESH</button>
             </div>
         </div>
         <div class="inv-grid" id="invGrid"></div>
@@ -1437,24 +1524,24 @@ HTML_UI = """
     <!-- TRANSFER -->
     <div id="view-trans" class="content">
         <div class="transfer-panel">
-            <h2 style="margin:0; text-align:center;">Asset Transfer</h2>
+            <h2>Asset Transfer</h2>
             <div class="chk-row">
                 <div class="chk-box" id="chkTok" onclick="toggleT('tok')">
-                    <div><div style="font-weight:700;color:#fff;">Tokens</div><div style="font-size:11px;color:#666;">Choose amount</div></div>
-                    <div style="color:var(--accent); font-weight:bold;" id="indTok"></div>
+                    <div><div style="font-weight:700;color:#fff;">Tokens</div><div style="font-size:11px;color:var(--text-dim); margin-top:2px;">Choose amount</div></div>
+                    <div style="color:var(--accent); font-weight:bold; font-size:16px;" id="indTok"></div>
                 </div>
                 <div class="chk-box" id="chkSkin" onclick="toggleT('skin')">
-                    <div><div style="font-weight:700;color:#fff;">Skins</div><div style="font-size:11px;color:#666;">All cached items</div></div>
-                    <div style="color:var(--accent); font-weight:bold;" id="indSkin"></div>
+                    <div><div style="font-weight:700;color:#fff;">Skins</div><div style="font-size:11px;color:var(--text-dim); margin-top:2px;">All cached items</div></div>
+                    <div style="color:var(--accent); font-weight:bold; font-size:16px;" id="indSkin"></div>
                 </div>
             </div>
-            <div id="tokenAmountWrap" style="display:none; margin-bottom:12px;">
-                <div style="font-size:10px; color:#777; margin-bottom:6px; text-transform:uppercase;">Token Amount To Transfer</div>
-                <div style="display:flex; gap:10px;">
-                    <input id="tokenAmountInput" type="number" min="1" step="1" placeholder="Enter amount..." style="flex:1; padding:10px; background:#111; border:1px solid var(--border); color:#fff; border-radius:8px; font-family:'JetBrains Mono'; box-sizing:border-box;">
-                    <button onclick="setMaxTokens()" style="padding:10px 20px; background:var(--accent); color:#000; border:none; border-radius:8px; cursor:pointer; font-weight:700;">MAX</button>
+            <div id="tokenAmountWrap" style="display:none; margin-bottom:16px;">
+                <div class="sb-label" style="margin-bottom:6px;">Token Amount</div>
+                <div style="display:flex; gap:8px;">
+                    <input id="tokenAmountInput" type="number" min="1" step="1" placeholder="Enter amount..." style="flex:1; padding:10px 12px; background:var(--bg-elev); border:1px solid var(--border-soft); color:#fff; border-radius:var(--radius-sm); font-family:'JetBrains Mono'; outline:none;">
+                    <button onclick="setMaxTokens()" class="btn-accent" style="padding:10px 18px;">MAX</button>
                 </div>
-                <div id="tokenAvailable" style="margin-top:6px; font-size:11px; color:#888;"></div>
+                <div id="tokenAvailable" style="margin-top:6px; font-size:11px; color:var(--text-dim); font-family:'JetBrains Mono';"></div>
             </div>
             <button class="big-btn" onclick="runTransfer()">INITIATE TRANSFER</button>
         </div>
@@ -1463,102 +1550,106 @@ HTML_UI = """
     <!-- CONVERT -->
     <div id="view-conv" class="content">
         <div style="max-width:1200px; margin:0 auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2 style="margin:0; color:#fff;">Case Converter</h2>
-                <div style="font-family:'JetBrains Mono'; font-size:12px; color:#fff;">Balance: $<span id="convBalance">0</span></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
+                <h2 style="margin:0;">Case Converter</h2>
+                <div style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-muted);">Balance: <span style="color:var(--accent);">$<span id="convBalance">0</span></span></div>
             </div>
-            
+
             <!-- CONVERT JOB STATUS -->
-            <div id="convertJobStatus" style="display:none; background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:20px; box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <div id="convertJobStatus" class="panel" style="display:none; margin-bottom:18px; border-color: rgba(16,185,129,0.3); box-shadow: 0 0 24px rgba(16, 185, 129, 0.12);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                     <div>
-                        <div style="font-weight:700; color:#fff; font-size:14px; margin-bottom:4px;">Converting to <span id="jobSellMethod" style="color:var(--accent);">tokens</span></div>
-                        <div style="font-size:12px; color:#888;" id="jobCaseName">Case Name</div>
+                        <div style="font-weight:700; color:#fff; font-size:13px; margin-bottom:3px;">Converting to <span id="jobSellMethod" style="color:var(--accent);">tokens</span></div>
+                        <div style="font-size:11px; color:var(--text-dim); font-family:'JetBrains Mono';" id="jobCaseName">Case Name</div>
                     </div>
-                    <div style="font-family:'JetBrains Mono'; font-size:18px; color:var(--accent); font-weight:700;" id="jobProgressText">0%</div>
+                    <div style="font-family:'JetBrains Mono'; font-size:20px; color:var(--accent); font-weight:700;" id="jobProgressText">0%</div>
                 </div>
-                <div style="background:#111; border-radius:8px; padding:2px; margin-bottom:10px; overflow:hidden; position:relative;">
-                    <div id="jobProgressBar" style="background:linear-gradient(90deg, var(--accent) 0%, #0f0 100%); height:28px; border-radius:6px; transition:width 0.3s ease; width:0%; display:flex; align-items:center; justify-content:center; color:#000; font-weight:800; font-size:12px; text-shadow:0 1px 2px rgba(0,0,0,0.3);"></div>
+                <div style="background:var(--bg-dark); border-radius:var(--radius-sm); padding:2px; margin-bottom:12px; overflow:hidden; position:relative;">
+                    <div id="jobProgressBar" style="background:linear-gradient(90deg, var(--accent) 0%, #34d399 100%); height:26px; border-radius:4px; transition:width 0.3s ease; width:0%; display:flex; align-items:center; justify-content:center; color:#04110a; font-weight:800; font-size:11px;"></div>
                 </div>
-                <div style="display:flex; justify-content:space-between; font-size:11px; color:#888; font-family:'JetBrains Mono';">
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); font-family:'JetBrains Mono';">
                     <div>Opened: <span id="jobOpened" style="color:#fff; font-weight:700;">0</span></div>
                     <div>Remaining: <span id="jobRemaining" style="color:#fff; font-weight:700;">0</span></div>
                     <div>Total: <span id="jobTotal" style="color:#fff; font-weight:700;">0</span></div>
                 </div>
-                <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border); font-size:11px; color:#888; font-family:'JetBrains Mono';">
+                <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border-soft); font-size:11px; color:var(--text-muted); font-family:'JetBrains Mono';">
                     Opening: <span id="jobBatchInfo" style="color:var(--accent); font-weight:700;">-</span>
                 </div>
-                <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border); font-size:11px; color:#888; font-family:'JetBrains Mono'; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border-soft); font-size:11px; color:var(--text-muted); font-family:'JetBrains Mono'; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                     <span>Spent: <span id="jobSpent" style="color:#fff; font-weight:700;">$0</span></span>
                     <span>Earned: <span id="jobEarned" style="color:var(--accent); font-weight:700;">-</span></span>
                     <span>ROI: <span id="jobRoi" style="color:#86efac; font-weight:700;">-</span></span>
                 </div>
             </div>
-            
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                 <!-- LEFT: Case Selection -->
-                <div style="background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:20px;">
-                    <div class="sb-label" style="margin-bottom:15px;">SELECT CASE / CAPSULE</div>
-                    <input id="caseSearch" type="text" placeholder="Search cases..." style="width:100%; padding:8px; background:#111; border:1px solid var(--border); color:#fff; border-radius:6px; margin-bottom:10px; font-size:12px; box-sizing:border-box;" oninput="filterCases()">
-                    <div style="max-height:400px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;">
-                        <div id="casesList" style="display:grid; gap:8px;"></div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">Select Case / Capsule</div>
+                    </div>
+                    <input id="caseSearch" type="text" placeholder="Search cases..." style="width:100%; padding:9px 12px; background:var(--bg-elev); border:1px solid var(--border-soft); color:#fff; border-radius:var(--radius-sm); margin-bottom:10px; font-size:12px; outline:none;" oninput="filterCases()">
+                    <div style="max-height:400px; overflow-y:auto; border:1px solid var(--border-soft); border-radius:var(--radius-sm); padding:8px;">
+                        <div id="casesList" style="display:grid; gap:6px;"></div>
                     </div>
                 </div>
-                
+
                 <!-- RIGHT: Configuration -->
-                <div style="background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:20px;">
-                    <div class="sb-label" style="margin-bottom:15px;">CONFIGURATION</div>
-                    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin:0 0 12px;">
-                        <div style="background:#111; border:1px solid var(--border); border-radius:8px; padding:10px;">
-                            <div style="font-size:10px; color:#777; text-transform:uppercase;">Case Units</div>
-                            <div id="transCaseUnits" style="color:#fff; font-weight:800; font-family:'JetBrains Mono'; margin-top:4px;">-</div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">Configuration</div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:0 0 12px;">
+                        <div class="mini-stat">
+                            <div class="mini-stat-label">Units</div>
+                            <div id="transCaseUnits" class="mini-stat-value">-</div>
                         </div>
-                        <div style="background:#111; border:1px solid var(--border); border-radius:8px; padding:10px;">
-                            <div style="font-size:10px; color:#777; text-transform:uppercase;">Case Value (100%)</div>
-                            <div id="transCaseValue" style="color:#60a5fa; font-weight:800; font-family:'JetBrains Mono'; margin-top:4px;">$-</div>
+                        <div class="mini-stat">
+                            <div class="mini-stat-label">Value (100%)</div>
+                            <div id="transCaseValue" class="mini-stat-value" style="color:var(--info);">$-</div>
                         </div>
-                        <div style="background:#111; border:1px solid var(--border); border-radius:8px; padding:10px;">
-                            <div style="font-size:10px; color:#777; text-transform:uppercase;">Sell Value (70%)</div>
-                            <div id="transCaseSellValue" style="color:var(--accent); font-weight:800; font-family:'JetBrains Mono'; margin-top:4px;">$-</div>
+                        <div class="mini-stat">
+                            <div class="mini-stat-label">Sell Value (70%)</div>
+                            <div id="transCaseSellValue" class="mini-stat-value" style="color:var(--accent);">$-</div>
                         </div>
                     </div>
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; gap:8px;">
-                        <div id="transCaseUpdated" style="font-size:11px; color:#777;">Not scanned yet</div>
-                        <div style="display:flex; gap:8px;">
-                            <button id="btnRefreshCaseSummary" onclick="requestCaseSummary(true)" style="padding:8px 10px; background:#1f2937; border:1px solid #374151; color:#fff; border-radius:6px; cursor:pointer; font-size:11px; font-weight:700;">REFRESH CASES</button>
-                            <button id="btnSellCases" onclick="sellCasesSnapshot()" style="padding:8px 10px; background:#eab308; border:none; color:#000; border-radius:6px; cursor:pointer; font-size:11px; font-weight:800;">SELL CASES</button>
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; gap:8px; flex-wrap:wrap;">
+                        <div id="transCaseUpdated" style="font-size:10px; color:var(--text-dim); font-family:'JetBrains Mono';">Not scanned yet</div>
+                        <div style="display:flex; gap:6px;">
+                            <button id="btnRefreshCaseSummary" onclick="requestCaseSummary(true)" style="padding:7px 10px; background:var(--bg-elev); border:1px solid var(--border); color:#fff; border-radius:var(--radius-sm); cursor:pointer; font-size:10px; font-weight:700; letter-spacing:0.3px;">REFRESH</button>
+                            <button id="btnSellCases" onclick="sellCasesSnapshot()" style="padding:7px 10px; background:var(--warn); border:none; color:#000; border-radius:var(--radius-sm); cursor:pointer; font-size:10px; font-weight:800; letter-spacing:0.3px;">SELL CASES</button>
                         </div>
                     </div>
-                    <div id="sellCasesLoader" style="display:none; margin-bottom:16px; background:#111; border:1px solid var(--border); border-radius:8px; padding:10px;">
-                        <div style="height:6px; border-radius:999px; background:#1f2937; overflow:hidden;">
+                    <div id="sellCasesLoader" style="display:none; margin-bottom:14px; background:var(--bg-elev); border:1px solid var(--border-soft); border-radius:var(--radius-sm); padding:10px;">
+                        <div style="height:6px; border-radius:999px; background:var(--bg-dark); overflow:hidden;">
                             <div id="sellCasesLoaderBar" style="height:100%; width:35%; background:linear-gradient(90deg, var(--accent), #22d3ee); animation: pulse 1.1s ease-in-out infinite;"></div>
                         </div>
-                        <div id="sellCasesLoaderText" style="font-size:11px; color:#bbb; margin-top:8px;">Selling snapshot of current cases...</div>
+                        <div id="sellCasesLoaderText" style="font-size:11px; color:var(--text-muted); margin-top:8px;">Selling snapshot of current cases...</div>
                     </div>
-                    
-                    <div id="selectedCaseInfo" style="display:none; margin-bottom:20px; padding:15px; background:#111; border-radius:8px; border:1px solid var(--border);">
-                        <div style="font-weight:700; color:#fff; margin-bottom:8px;" id="selectedCaseName"></div>
-                        <div style="font-size:11px; color:#888;">Price: $<span id="selectedCasePrice">0</span></div>
+
+                    <div id="selectedCaseInfo" style="display:none; margin-bottom:16px; padding:12px 14px; background:var(--bg-elev); border-radius:var(--radius-sm); border:1px solid var(--border-soft);">
+                        <div style="font-weight:700; color:#fff; margin-bottom:4px;" id="selectedCaseName"></div>
+                        <div style="font-size:11px; color:var(--text-muted); font-family:'JetBrains Mono';">Price: $<span id="selectedCasePrice">0</span></div>
                     </div>
-                    
-                    <div style="margin-bottom:20px;">
-                        <div class="sb-label" style="margin-bottom:8px;">SELL METHOD</div>
-                        <div style="display:flex; gap:10px;">
-                            <button id="btnSellMoney" onclick="setSellMethod('money')" style="flex:1; padding:10px; background:#222; border:1px solid var(--border); color:#fff; border-radius:6px; cursor:pointer; font-weight:700; transition:0.2s;">Money</button>
-                            <button id="btnSellTokens" onclick="setSellMethod('tokens')" style="flex:1; padding:10px; background:#222; border:1px solid var(--border); color:#fff; border-radius:6px; cursor:pointer; font-weight:700; transition:0.2s;">Tokens</button>
+
+                    <div style="margin-bottom:16px;">
+                        <div class="sb-label" style="margin-bottom:6px;">Sell Method</div>
+                        <div style="display:flex; gap:8px;">
+                            <button id="btnSellMoney" onclick="setSellMethod('money')" style="flex:1; padding:10px; background:var(--bg-elev); border:1px solid var(--border-soft); color:#fff; border-radius:var(--radius-sm); cursor:pointer; font-weight:700; transition:0.15s;">Money</button>
+                            <button id="btnSellTokens" onclick="setSellMethod('tokens')" style="flex:1; padding:10px; background:var(--bg-elev); border:1px solid var(--border-soft); color:#fff; border-radius:var(--radius-sm); cursor:pointer; font-weight:700; transition:0.15s;">Tokens</button>
                         </div>
                     </div>
-                    
-                    <div style="margin-bottom:20px;">
-                        <div class="sb-label" style="margin-bottom:8px;">BUDGET</div>
-                        <div style="display:flex; gap:10px;">
-                            <input id="convBudget" type="number" placeholder="Amount..." style="flex:1; padding:10px; background:#111; border:1px solid var(--border); color:#fff; border-radius:6px; font-family:'JetBrains Mono';" min="0" step="0.01" oninput="updateCaseCount()">
-                            <button onclick="setMaxBudget()" style="padding:10px 20px; background:var(--accent); color:#000; border:none; border-radius:6px; cursor:pointer; font-weight:700;">MAX</button>
+
+                    <div style="margin-bottom:16px;">
+                        <div class="sb-label" style="margin-bottom:6px;">Budget</div>
+                        <div style="display:flex; gap:8px;">
+                            <input id="convBudget" type="number" placeholder="Amount..." style="flex:1; padding:10px 12px; background:var(--bg-elev); border:1px solid var(--border-soft); color:#fff; border-radius:var(--radius-sm); font-family:'JetBrains Mono'; outline:none;" min="0" step="0.01" oninput="updateCaseCount()">
+                            <button onclick="setMaxBudget()" class="btn-accent" style="padding:10px 16px;">MAX</button>
                         </div>
-                        <div style="margin-top:8px; font-size:11px; color:#888;" id="convCaseCount">Estimated: 0 cases</div>
+                        <div style="margin-top:6px; font-size:11px; color:var(--text-dim); font-family:'JetBrains Mono';" id="convCaseCount">Estimated: 0 cases</div>
                     </div>
-                    
-                    <button id="btnConfirmConvert" onclick="confirmConvert()" style="width:100%; padding:15px; background:#fff; color:#000; border:none; border-radius:8px; cursor:pointer; font-weight:800; font-size:14px; text-transform:uppercase; opacity:0.5; cursor:not-allowed;" disabled>CONFIRM</button>
+
+                    <button id="btnConfirmConvert" onclick="confirmConvert()" class="big-btn" style="opacity:0.5; cursor:not-allowed;" disabled>CONFIRM</button>
                 </div>
             </div>
         </div>
@@ -1567,31 +1658,35 @@ HTML_UI = """
     <!-- BOOSTER -->
     <div id="view-boost" class="content">
         <div style="max-width:1200px; margin:0 auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2 style="margin:0; color:#fff;">Alt Booster</h2>
-                <div style="font-family:'JetBrains Mono'; font-size:12px; color:#fff;">Boost to global by cycling case opens</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
+                <h2 style="margin:0;">Alt Booster</h2>
+                <div style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-muted);">Boost to global by cycling case opens</div>
             </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-                <div style="background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:20px;">
-                    <div class="sb-label" style="margin-bottom:12px;">ACCOUNT OVERVIEW</div>
-                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
-                        <img id="boosterRankImage" src="https://case-clicker.com/img/unknown.png" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2764%27 height=%2764%27%3E%3Crect width=%27100%25%27 height=%27100%25%27 fill=%27%23333%27/%3E%3C/svg%3E'" style="width:42px; height:42px; object-fit:contain; border:1px solid var(--border); border-radius:8px; background:#111;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">Account Overview</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+                        <img id="boosterRankImage" src="https://case-clicker.com/img/unknown.png" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2764%27 height=%2764%27%3E%3Crect width=%27100%25%27 height=%27100%25%27 fill=%27%23333%27/%3E%3C/svg%3E'" style="width:46px; height:46px; object-fit:contain; border:1px solid var(--border-soft); border-radius:var(--radius-md); background:var(--bg-elev); padding:4px;">
                         <div>
-                            <div style="font-size:12px; color:#888;">Current Rank</div>
-                            <div id="boosterRankName" style="font-weight:700; color:#fff;">Unknown</div>
+                            <div style="font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Current Rank</div>
+                            <div id="boosterRankName" style="font-weight:700; color:#fff; margin-top:2px;">Unknown</div>
                         </div>
                     </div>
-                    <div style="font-size:12px; color:#888;">Created at</div>
-                    <div id="boosterCreatedAt" style="font-family:'JetBrains Mono'; color:#fff; margin-top:4px;">Unknown</div>
+                    <div style="font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Created at</div>
+                    <div id="boosterCreatedAt" style="font-family:'JetBrains Mono'; color:#fff; margin-top:4px; font-size:13px;">Unknown</div>
                 </div>
-                <div style="background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:20px;">
-                    <div class="sb-label" style="margin-bottom:8px;">CASE SELECTION</div>
-                    <select id="boosterCaseSelect" style="width:100%; padding:10px; background:#111; border:1px solid var(--border); color:#fff; border-radius:6px; margin-bottom:12px;"></select>
-                    <label style="display:flex; align-items:center; gap:10px; font-size:12px; color:#ddd; margin-bottom:16px; background:#111; border:1px solid var(--border); border-radius:8px; padding:10px 12px; cursor:pointer;">
-                        <input id="boosterClickUntil" type="checkbox" style="width:16px; height:16px; accent-color: var(--accent); cursor:pointer;">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">Case Selection</div>
+                    </div>
+                    <select id="boosterCaseSelect" style="width:100%; padding:10px 12px; background:var(--bg-elev); border:1px solid var(--border-soft); color:#fff; border-radius:var(--radius-sm); margin-bottom:12px; outline:none; font-family:'Inter'; cursor:pointer;"></select>
+                    <label style="display:flex; align-items:center; gap:10px; font-size:12px; color:#e4e4e7; margin-bottom:16px; background:var(--bg-elev); border:1px solid var(--border-soft); border-radius:var(--radius-sm); padding:11px 12px; cursor:pointer;">
+                        <input id="boosterClickUntil" type="checkbox" style="width:14px; height:14px; accent-color: var(--accent); cursor:pointer;">
                         <span>Click until boost ends (48h account age)</span>
                     </label>
-                    <button id="boosterStartBtn" onclick="startBooster()" style="width:100%; padding:14px; background:var(--accent); color:#000; border:none; border-radius:8px; cursor:pointer; font-weight:800;">START BOOSTER</button>
+                    <button id="boosterStartBtn" onclick="startBooster()" class="big-btn" style="background:var(--accent); color:#04110a;">START BOOSTER</button>
                 </div>
             </div>
         </div>
@@ -1626,6 +1721,9 @@ HTML_UI = """
     let transferSellState = 'idle'; // idle | loading | done | error
     let transferSummaryRequestedAt = 0;
     let sellDoneResetTimer = null;
+    let accSearchQuery = "";
+    let statusFilter = "all"; // "all" | "online" | "offline"
+    let selectedIds = new Set();
 
     const bar = document.querySelector('#nprogress .bar');
     function loadStart() { bar.style.width = '0%'; setTimeout(()=>bar.style.width='60%', 50); }
@@ -1636,6 +1734,16 @@ HTML_UI = """
         const s = await (await fetch('/api/settings')).json();
         mainId = s.main_id || "";
         document.getElementById('mainId').value = mainId;
+        try {
+            const r = await (await fetch('/api/remote_url')).json();
+            document.getElementById('remoteUrl').value = r.url || "";
+            const hint = document.getElementById('remoteUrlHint');
+            if (r.detected) {
+                hint.textContent = `Auto-detected: http://${r.detected}:${r.port}`;
+            } else {
+                hint.textContent = "No Tailscale detected — paste URL manually.";
+            }
+        } catch (e) { /* non-fatal */ }
         cases = await (await fetch('/api/cases')).json();
         await refresh();
         loadEnd();
@@ -1707,36 +1815,37 @@ HTML_UI = """
 
     function renderOverview() {
         const grid = document.getElementById('overviewGrid');
+        const summary = document.getElementById('overviewSummary');
         grid.innerHTML = '';
-        
+
+        if (accounts.length === 0) {
+            grid.innerHTML = '<div class="ov-empty">No accounts linked yet. Copy the worker link from the sidebar and paste it into Tampermonkey.</div>';
+            if (summary) summary.textContent = '';
+            return;
+        }
+
+        const onlineCount = accounts.filter(accountIsOnline).length;
+        if (summary) summary.textContent = `${onlineCount}/${accounts.length} online`;
+
         accounts.forEach(acc => {
             const s = acc.stats || {};
-            let isOnline = (Date.now()/1000 - acc.last_seen) < 15;
-            if (s.vaultLastCollected) {
-                const vaultTime = new Date(s.vaultLastCollected).getTime() / 1000;
-                if ((Date.now()/1000 - vaultTime) > 180) isOnline = false;
-            }
-            
-            // Color based on status
-            let statusClass = isOnline ? 'bg-online' : 'bg-offline';
-            let statusText = isOnline ? 'Online' : 'Offline';
-            let statusTextColor = isOnline ? 'var(--accent)' : '#ef4444';
-            
+            const isOnline = accountIsOnline(acc);
+
             const card = document.createElement('div');
-            card.className = `ov-card ${statusClass}`;
+            card.className = 'ov-card';
             card.onclick = () => selectAcc(acc.id);
-            
+
             card.innerHTML = `
-                <img src="${acc.avatar || 'https://case-clicker.com/img/unknown.png'}" class="ov-avatar" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${IMG_FALLBACK}'">
+                <div class="ov-avatar-wrap">
+                    <img src="${acc.avatar || 'https://case-clicker.com/img/unknown.png'}" class="ov-avatar" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${IMG_FALLBACK}'">
+                    <div class="avatar-status ${isOnline ? 'online' : ''}"></div>
+                </div>
                 <div class="ov-meta">
-                    <div class="ov-name">${acc.username || 'Unknown'}</div>
+                    <div class="ov-name">${acc.username || 'Unknown'}${acc.id === mainId ? ' <span class="main-tag" style="margin-left:4px;">MAIN</span>' : ''}</div>
                     <div class="ov-stats">
                         <div class="ov-stat" style="color:var(--accent)">$${Math.floor(s.money||0).toLocaleString()}</div>
-                        <div class="ov-stat" style="color:#eab308">T ${Math.floor(s.tokens||0).toLocaleString()}</div>
-                    </div>
-                    <div class="acc-status" style="margin-top:5px;">
-                        <div class="status-dot ${isOnline ? 'dot-online' : 'dot-offline'}"></div>
-                        <span style="color:${statusTextColor}">${statusText}</span>
+                        <div class="ov-stat" style="color:var(--warn)">T ${Math.floor(s.tokens||0).toLocaleString()}</div>
+                        <div class="ov-stat" style="color:var(--text-dim)">${isOnline ? 'Online' : 'Offline'}</div>
                     </div>
                 </div>
             `;
@@ -1744,10 +1853,29 @@ HTML_UI = """
         });
     }
 
+    function accountIsOnline(acc) {
+        const s = acc.stats || {};
+        const now = Date.now() / 1000;
+        let online = (now - (acc.last_seen || 0)) < 15;
+        if (s.vaultLastCollected) {
+            const vaultTime = new Date(s.vaultLastCollected).getTime() / 1000;
+            if ((now - vaultTime) > 180) online = false;
+        }
+        return online;
+    }
+
+    function matchesSearch(acc, q) {
+        if (!q) return true;
+        const query = q.toLowerCase();
+        const name = (acc.username || '').toLowerCase();
+        const id = (acc.id || '').toLowerCase();
+        return name.includes(query) || id.includes(query);
+    }
+
     function renderSidebar() {
         const list = document.getElementById('accList');
         list.innerHTML = '';
-        
+
         let sortedAccs = [...accounts];
         if(mainId) {
             const mainAcc = sortedAccs.find(a => a.id === mainId);
@@ -1757,37 +1885,43 @@ HTML_UI = """
             }
         }
 
-        const now = Date.now() / 1000;
+        const filtered = sortedAccs.filter(acc => {
+            if (!matchesSearch(acc, accSearchQuery)) return false;
+            const online = accountIsOnline(acc);
+            if (statusFilter === 'online' && !online) return false;
+            if (statusFilter === 'offline' && online) return false;
+            return true;
+        });
 
-        sortedAccs.forEach((acc, index) => {
+        if (filtered.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'acc-empty';
+            empty.textContent = accounts.length === 0 ? 'No accounts linked yet.' : 'No accounts match your search.';
+            list.appendChild(empty);
+            updateBulkBar();
+            return;
+        }
+
+        filtered.forEach((acc, index) => {
             const s = acc.stats || {};
-            let isOnline = (now - acc.last_seen) < 15;
-            if (s.vaultLastCollected) {
-                const vaultTime = new Date(s.vaultLastCollected).getTime() / 1000;
-                if ((now - vaultTime) > 180) isOnline = false;
-            }
-
-            // Fargelegging
-            let statusClass = isOnline ? 'bg-online' : 'bg-offline';
-            let statusText = isOnline ? 'Account Online' : 'Account Offline';
-            let statusTextColor = isOnline ? 'var(--accent)' : '#ef4444';
-
+            const isOnline = accountIsOnline(acc);
             const isPro = s.membership === 'pro';
             let premRating = s.premierRating || 0;
-            let premColor = '255, 215, 0'; 
+            let premColor = '255, 215, 0';
             if (s.premierRank && s.premierRank.color) premColor = s.premierRank.color;
             const premBg = `rgba(${premColor}, 0.2)`;
             const premFg = `rgb(${premColor})`;
-            
+
             const avatarUrl = acc.avatar && acc.avatar !== "" ? acc.avatar : "https://case-clicker.com/img/unknown.png";
-            
             const isMain = acc.id === mainId;
-            let classes = `acc-item ${acc.id === selectedId ? 'active' : ''} ${isMain ? 'pinned' : ''} ${statusClass}`;
-            
+            const isSelected = selectedIds.has(acc.id);
+
             const el = document.createElement('div');
+            let classes = `acc-item ${acc.id === selectedId ? 'active' : ''} ${isMain ? 'pinned' : ''}`;
+            if (isEditMode && isSelected) classes += ' selected';
             el.className = classes;
             el.dataset.id = acc.id;
-            
+
             if(isEditMode && !isMain) {
                 el.classList.add('draggable');
                 el.draggable = true;
@@ -1797,12 +1931,31 @@ HTML_UI = """
                 el.addEventListener('dragend', handleDragEnd);
             }
 
-            el.onclick = () => { if(!isEditMode) selectAcc(acc.id); };
-            
+            el.onclick = (e) => {
+                if (isEditMode) {
+                    if (e.target.closest('.acc-quick-delete')) return;
+                    toggleBulkSelect(acc.id);
+                } else {
+                    selectAcc(acc.id);
+                }
+            };
+
+            const money = Math.floor(s.money || 0);
+            const tokens = Math.floor(s.tokens || 0);
+            const metaLine = `<span class="mm">$${money.toLocaleString()}</span><span class="mt">T ${tokens.toLocaleString()}</span>`;
+
             el.innerHTML = `
-                <img src="${avatarUrl}" class="acc-avatar" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${IMG_FALLBACK}'">
+                <div class="acc-check ${isEditMode && !isMain ? 'show' : ''} ${isSelected ? 'checked' : ''}"></div>
+                <div class="acc-drag-handle ${isEditMode && !isMain ? 'show' : ''}" title="Drag to reorder">⋮⋮</div>
+                <div class="acc-avatar-wrap">
+                    <img src="${avatarUrl}" class="acc-avatar" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${IMG_FALLBACK}'">
+                    <div class="avatar-status ${isOnline ? 'online' : ''}"></div>
+                </div>
                 <div class="acc-info">
-                    <div class="acc-name">${acc.username || 'Unknown'} ${isMain ? ' (MAIN)' : ''}</div>
+                    <div class="acc-name-row">
+                        <div class="acc-name">${acc.username || 'Unknown'}</div>
+                        ${isMain ? '<span class="main-tag">MAIN</span>' : ''}
+                    </div>
                     <div class="badge-row">
                         ${isPro ? '<div class="pro-tag">PRO</div>' : ''}
                         ${premRating > 0 ? `
@@ -1811,31 +1964,135 @@ HTML_UI = """
                             <div class="prem-val">${premRating.toLocaleString()}</div>
                         </div>` : ''}
                     </div>
-                    <div class="acc-status">
-                        <div class="status-dot ${isOnline ? 'dot-online' : 'dot-offline'}"></div>
-                        <span style="color:${statusTextColor}">${statusText}</span>
-                    </div>
+                    <div class="acc-meta">${metaLine}</div>
                 </div>
+                ${isEditMode && !isMain ? `<button class="acc-quick-delete show" title="Unlink this account">×</button>` : ''}
             `;
+
+            if(isEditMode && !isMain) {
+                const delBtn = el.querySelector('.acc-quick-delete');
+                if (delBtn) {
+                    delBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        quickUnlinkAccount(acc.id, acc.username || acc.id);
+                    });
+                }
+            }
+
             list.appendChild(el);
 
-            if(isMain && index === 0) {
+            if(isMain && index === 0 && filtered.length > 1) {
                 const sep = document.createElement('div');
                 sep.className = 'main-separator';
                 list.appendChild(sep);
             }
         });
+
+        updateBulkBar();
+    }
+
+    function filterAccounts() {
+        accSearchQuery = (document.getElementById('accSearch')?.value || '').trim();
+        renderSidebar();
+    }
+
+    function cycleStatusFilter() {
+        const next = { all: 'online', online: 'offline', offline: 'all' };
+        statusFilter = next[statusFilter] || 'all';
+        const btn = document.getElementById('statusFilterBtn');
+        if (btn) {
+            btn.textContent = statusFilter === 'all' ? 'All' : statusFilter === 'online' ? 'Online' : 'Offline';
+            btn.classList.toggle('active', statusFilter !== 'all');
+        }
+        renderSidebar();
+    }
+
+    // --- EDIT MODE + BULK ACTIONS ---
+    function toggleEditMode() {
+        isEditMode = !isEditMode;
+        document.getElementById('editBtn').classList.toggle('active', isEditMode);
+        document.getElementById('editHint').classList.toggle('show', isEditMode);
+        if (!isEditMode) {
+            selectedIds.clear();
+        }
+        renderSidebar();
+    }
+
+    function toggleBulkSelect(id) {
+        if (id === mainId) return; // never select main
+        if (selectedIds.has(id)) selectedIds.delete(id);
+        else selectedIds.add(id);
+        renderSidebar();
+    }
+
+    function bulkSelectAll() {
+        accounts.forEach(a => { if (a.id !== mainId) selectedIds.add(a.id); });
+        renderSidebar();
+    }
+
+    function bulkClearSelection() {
+        selectedIds.clear();
+        renderSidebar();
+    }
+
+    async function bulkSetMain() {
+        if (selectedIds.size !== 1) {
+            alert('Select exactly one account to mark as main.');
+            return;
+        }
+        const newMainId = [...selectedIds][0];
+        mainId = newMainId;
+        document.getElementById('mainId').value = newMainId;
+        await fetch('/api/settings', {
+            method: 'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({main_id: mainId})
+        });
+        selectedIds.clear();
+        renderSidebar();
+    }
+
+    async function bulkDelete() {
+        if (selectedIds.size === 0) return;
+        const count = selectedIds.size;
+        if (!confirm(`Unlink ${count} account${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+        const ids = [...selectedIds];
+        for (const id of ids) {
+            await fetch('/api/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id})
+            });
+            if (id === selectedId) selectedId = null;
+        }
+        selectedIds.clear();
+        await refresh();
+    }
+
+    async function quickUnlinkAccount(id, label) {
+        if (!confirm(`Unlink "${label}"?`)) return;
+        await fetch('/api/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id})
+        });
+        if (id === selectedId) { selectedId = null; goHome(); }
+        selectedIds.delete(id);
+        await refresh();
+    }
+
+    function updateBulkBar() {
+        const bar = document.getElementById('bulkBar');
+        const count = document.getElementById('bulkSelectedCount');
+        if (!bar || !count) return;
+        const show = isEditMode && selectedIds.size > 0;
+        bar.classList.toggle('show', show);
+        count.textContent = selectedIds.size;
     }
 
     // --- DRAG AND DROP ---
     let draggedItem = null;
     let isDraggingItem = false;
-
-    function toggleEditMode() {
-        isEditMode = !isEditMode;
-        document.getElementById('editBtn').classList.toggle('active');
-        renderSidebar();
-    }
 
     function handleDragStart(e) {
         draggedItem = this;
@@ -1856,7 +2113,7 @@ HTML_UI = """
             let allItems = [...document.querySelectorAll('.acc-item:not(.pinned)')];
             let dragIdx = allItems.indexOf(draggedItem);
             let dropIdx = allItems.indexOf(this);
-            
+
             if(dragIdx < dropIdx) {
                 this.parentNode.insertBefore(draggedItem, this.nextSibling);
             } else {
@@ -1887,7 +2144,7 @@ HTML_UI = """
         });
     }
 
-    // --- STANDARD LOGIC ---
+    // --- ACCOUNT DETAIL VIEW ---
     function selectAcc(id) {
         loadStart();
         selectedId = id;
@@ -2440,10 +2697,14 @@ HTML_UI = """
     
     function setSellMethod(method) {
         sellMethod = method;
-        document.getElementById('btnSellMoney').style.background = method === 'money' ? 'var(--accent)' : '#222';
-        document.getElementById('btnSellMoney').style.color = method === 'money' ? '#000' : '#fff';
-        document.getElementById('btnSellTokens').style.background = method === 'tokens' ? '#eab308' : '#222';
-        document.getElementById('btnSellTokens').style.color = method === 'tokens' ? '#000' : '#fff';
+        const money = document.getElementById('btnSellMoney');
+        const tokens = document.getElementById('btnSellTokens');
+        money.style.background = method === 'money' ? 'var(--accent)' : 'var(--bg-elev)';
+        money.style.color = method === 'money' ? '#04110a' : '#fff';
+        money.style.borderColor = method === 'money' ? 'var(--accent)' : 'var(--border-soft)';
+        tokens.style.background = method === 'tokens' ? 'var(--warn)' : 'var(--bg-elev)';
+        tokens.style.color = method === 'tokens' ? '#111' : '#fff';
+        tokens.style.borderColor = method === 'tokens' ? 'var(--warn)' : 'var(--border-soft)';
         checkConfirmEnabled();
     }
     
@@ -2510,10 +2771,12 @@ HTML_UI = """
         document.getElementById('selectedCaseInfo').style.display = 'none';
         document.getElementById('convBudget').value = '';
         document.getElementById('caseSearch').value = '';
-        document.getElementById('btnSellMoney').style.background = '#222';
+        document.getElementById('btnSellMoney').style.background = 'var(--bg-elev)';
         document.getElementById('btnSellMoney').style.color = '#fff';
-        document.getElementById('btnSellTokens').style.background = '#222';
+        document.getElementById('btnSellMoney').style.borderColor = 'var(--border-soft)';
+        document.getElementById('btnSellTokens').style.background = 'var(--bg-elev)';
         document.getElementById('btnSellTokens').style.color = '#fff';
+        document.getElementById('btnSellTokens').style.borderColor = 'var(--border-soft)';
         checkConfirmEnabled();
         renderConvertTab();
     }
@@ -2586,17 +2849,25 @@ HTML_UI = """
                 activeJobs.push({ account: acc, job: acc.booster_job, jobType: 'booster' });
             }
         });
-        
+
         const alertCount = activeJobs.filter(j => j.job.alert).length;
         const alertBadge = document.getElementById('activeJobsAlertBadge');
         if(alertBadge) {
             alertBadge.innerText = alertCount > 0 ? `!${alertCount}` : '0';
             alertBadge.style.display = alertCount > 0 ? 'inline-block' : 'none';
+            alertBadge.dataset.zero = alertCount > 0 ? '0' : '1';
         }
 
         const badge = document.getElementById('activeJobsBadge');
         const activeCount = activeJobs.filter(j => j.job.active).length;
         badge.innerText = activeCount > 0 ? activeCount : '';
+        badge.dataset.zero = activeCount > 0 ? '0' : '1';
+
+        const btn = document.querySelector('.active-jobs-btn');
+        if (btn) {
+            btn.classList.toggle('has-active', activeCount > 0);
+            btn.classList.toggle('has-alert', alertCount > 0);
+        }
         
         const list = document.getElementById('activeJobsList');
         if(activeJobs.length === 0) {
@@ -2699,12 +2970,24 @@ HTML_UI = """
         loadStart();
         mainId = document.getElementById('mainId').value;
         await fetch('/api/settings', {
-            method: 'POST', 
-            headers:{'Content-Type':'application/json'}, 
+            method: 'POST',
+            headers:{'Content-Type':'application/json'},
             body: JSON.stringify({main_id: mainId})
         });
+        const remoteUrl = (document.getElementById('remoteUrl').value || "").trim();
+        const remoteRes = await fetch('/api/remote_url', {
+            method: 'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({url: remoteUrl})
+        });
+        try {
+            const remoteData = await remoteRes.json();
+            if (remoteData && typeof remoteData.url === 'string') {
+                document.getElementById('remoteUrl').value = remoteData.url;
+            }
+        } catch (_) {}
         loadEnd();
-        renderSidebar(); 
+        renderSidebar();
     }
 
     async function deleteAcc() {

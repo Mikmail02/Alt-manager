@@ -1,4 +1,4 @@
-__version__ = "1.0.13"
+__version__ = "1.1.0"
 
 APP_NAME = "Case Clicker Hub"
 APP_SHORT = "CCHub"
