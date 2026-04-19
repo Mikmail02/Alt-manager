@@ -40,6 +40,30 @@ def _tailscale_binary() -> Optional[str]:
     return "tailscale"  # fall back to PATH lookup
 
 
+def normalize_remote_url(raw: str, default_port: int = 5000) -> str:
+    """Accept flexible input (IP, IP:port, URL with/without scheme/port/slash)
+    and return a canonical http(s)://host:port string with no trailing slash.
+    Empty input returns empty string."""
+    v = (raw or "").strip()
+    if not v:
+        return ""
+    # Drop any #fragment (e.g. token) the user accidentally pasted.
+    if "#" in v:
+        v = v.split("#", 1)[0].strip()
+    if not v:
+        return ""
+    # Default scheme.
+    if not v.lower().startswith(("http://", "https://")):
+        v = "http://" + v
+    # Strip trailing path/slash so we end at host[:port].
+    scheme, _, rest = v.partition("://")
+    host_port, _, _ = rest.partition("/")
+    # Append default port if missing.
+    if ":" not in host_port:
+        host_port = f"{host_port}:{default_port}"
+    return f"{scheme}://{host_port}"
+
+
 def worker_base_url(override: Optional[str] = None, port: int = 5000) -> str:
     """Best URL for workers: explicit override > auto-detected Tailscale IP > localhost."""
     if override:
