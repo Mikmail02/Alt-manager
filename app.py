@@ -26,6 +26,11 @@ app = Flask(__name__)
 auth.install(app)
 DB_LOCK = threading.RLock()
 
+# Worker-agent state (phase-1 POC: in-memory, not persisted). Keyed by agent name.
+# Each value: {"last_seen": ts, "version": str, "alts": [snapshot dicts]}
+AGENT_LOCK = threading.RLock()
+AGENT_STATE: dict = {}
+
 
 @app.route("/api/ping")
 def api_ping():
@@ -96,6 +101,33 @@ def api_apply_update():
 
     threading.Thread(target=_launch_and_exit, name="cchub-apply-update", daemon=True).start()
     return jsonify({"ok": True, "tag": release.tag})
+
+
+@app.route("/api/agent/heartbeat", methods=["POST"])
+def api_agent_heartbeat():
+    """Worker-agent pulses state. POC: in-memory only."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get("agent_name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "missing agent_name"}), 400
+    alts = data.get("alts") or []
+    if not isinstance(alts, list):
+        return jsonify({"ok": False, "error": "alts must be a list"}), 400
+    with AGENT_LOCK:
+        AGENT_STATE[name] = {
+            "last_seen": time.time(),
+            "version": data.get("agent_version") or "",
+            "alts": alts,
+        }
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agent/state", methods=["GET"])
+def api_agent_state():
+    """Debug endpoint — see which agents are alive."""
+    with AGENT_LOCK:
+        return jsonify({"ok": True, "agents": AGENT_STATE})
+
 
 def load_db():
     if not os.path.exists(DATA_FILE):

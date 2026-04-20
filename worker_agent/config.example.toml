@@ -1,0 +1,42 @@
+# Worker-agent config. Copy to config.toml and fill in values.
+# One file per VPS. Restart the agent after editing.
+
+[agent]
+# Friendly name for this VPS — shows up in the hub UI.
+name = "vps-1"
+
+# Your hub's Tailscale URL. Get it from the hub's sidebar
+# "Copy Worker Link" button (drop the /# fragment).
+# Example: http://100.64.1.23:5000
+hub_url = "http://100.x.y.z:5000"
+
+# API token from the hub. On the hub machine, open
+# %APPDATA%\CCHub\config.json (Windows) or ~/.cchub/config.json (macOS/Linux)
+# and copy the "api_token" value. Same token workers use.
+token = "PASTE_TOKEN_HERE"
+
+# How often to pulse the hub (seconds). 10 is a good default.
+heartbeat_interval_sec = 10
+
+[browser]
+# Run Chromium without a visible window. Keep true on VPS.
+headless = true
+
+# Where Playwright stores per-alt profile data (cookies, localStorage).
+# Relative paths resolve from the agent's working directory.
+user_data_base = "./user_data"
+
+# One [[alts]] block per account this VPS should run.
+# 'id' must match the account id in the hub (see hub DB or network tab).
+# 'cookies_file' points to a JSON array exported from your current browser.
+# See SETUP.md → "Exporting cookies" for the format.
+
+[[alts]]
+id = "alt-001"
+username = "MyFirstAlt"
+cookies_file = "./cookies/alt-001.json"
+
+# [[alts]]
+# id = "alt-002"
+# username = "MySecondAlt"
+# cookies_file = "./cookies/alt-002.json"

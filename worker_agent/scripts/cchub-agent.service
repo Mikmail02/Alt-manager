@@ -1,0 +1,23 @@
+[Unit]
+Description=CC Hub Worker Agent
+Documentation=https://github.com/Mikmail02/Alt-manager
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cchub
+Group=cchub
+WorkingDirectory=/opt/cchub-agent
+Environment=AGENT_CONFIG=/opt/cchub-agent/config.toml
+ExecStart=/opt/cchub-agent/venv/bin/python -m agent
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Playwright writes its browser download cache here.
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/cchub-agent/.playwright
+
+[Install]
+WantedBy=multi-user.target
