@@ -11,6 +11,7 @@ from playwright.async_api import BrowserContext, Page, TimeoutError as PWTimeout
 
 from .browser import BrowserPool
 from .cookies import load_cookie_file
+from .game_api import GameAPI, GameAPIError
 
 _log = logging.getLogger("agent.alt")
 
@@ -33,6 +34,7 @@ class AltRunner:
         self._pool = pool
         self._ctx: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
+        self._api: Optional[GameAPI] = None
         self._task: Optional[asyncio.Task] = None
         self._stopping = False
 
@@ -41,6 +43,10 @@ class AltRunner:
         self.last_check: float = 0.0
         self.last_error: str = ""
         self.last_url: str = ""
+        self.user_id: str = ""
+        self.money: float = 0.0
+        self.networth: float = 0.0
+        self.case_count: int = 0
 
     async def start(self) -> None:
         self._ctx = await self._pool.new_context(self.alt_id)
@@ -49,6 +55,7 @@ class AltRunner:
             await self._ctx.add_cookies(cookies)
             _log.info("[%s] loaded %d cookies", self.alt_id, len(cookies))
         self._page = await BrowserPool.first_page(self._ctx)
+        self._api = GameAPI(self._ctx, alt_id=self.alt_id)
         self._task = asyncio.create_task(self._loop(), name=f"alt-{self.alt_id}")
 
     async def stop(self) -> None:
@@ -92,56 +99,48 @@ class AltRunner:
         self.last_url = self._page.url
 
     async def _check_login(self) -> None:
-        """Heuristic: look for a 'logged in' signal in the DOM.
-
-        We don't rely on any single selector (the site evolves). Instead we grab
-        the current URL and the <title>, and also probe a few likely signals.
-        Good enough for phase 1; phase 2 will inject proper worker-JS that
-        reports real account state.
-        """
-        assert self._page is not None
+        """Authoritative: call /api/me. If it returns user data, we're logged in."""
+        assert self._page is not None and self._api is not None
         self.last_url = self._page.url
-        try:
-            title = await self._page.title()
-        except Exception:
-            title = ""
-
-        # Ask the page what it thinks. These selectors are best-effort — if
-        # they miss, we fall back to "page loaded without bouncing to /login".
-        evidence = await self._page.evaluate(
-            """() => {
-                const has = (sel) => !!document.querySelector(sel);
-                return {
-                    hasLoginBtn: has('a[href*="login" i]') || has('button[data-action="login"]'),
-                    hasLogout:  has('a[href*="logout" i]') || has('button[data-action="logout"]'),
-                    hasUserMenu: has('[class*="user" i][class*="menu" i]'),
-                    pathname: location.pathname || '/',
-                };
-            }"""
-        )
-        path = (evidence or {}).get("pathname", "/")
-        logged_in_hint = (evidence or {}).get("hasLogout") or (evidence or {}).get("hasUserMenu")
-        logged_out_hint = (evidence or {}).get("hasLoginBtn") and not logged_in_hint
-
-        if logged_in_hint:
-            self.online = True
-            self.last_error = ""
-        elif logged_out_hint or path.startswith("/login"):
-            self.online = False
-            self.last_error = "not logged in"
-        else:
-            # Ambiguous — assume online if the page loaded something meaningful.
-            self.online = bool(title)
-            if not title:
-                self.last_error = "blank page"
-
         self.last_check = time.time()
+
+        try:
+            me = await self._api.me()
+        except GameAPIError as exc:
+            self.online = False
+            self.last_error = f"api/me: {exc}"
+            _log.info("[%s] check: online=False err=%s", self.alt_id, exc)
+            return
+        except Exception as exc:
+            self.online = False
+            self.last_error = f"api/me crash: {exc}"
+            _log.warning("[%s] /api/me crashed: %s", self.alt_id, exc)
+            return
+
+        uid = me.get("_id") or ""
+        if not uid:
+            self.online = False
+            self.last_error = "api/me: no _id"
+            return
+
+        self.online = True
+        self.last_error = ""
+        self.user_id = str(uid)
+        self.money = float(me.get("money") or 0)
+        self.networth = float(me.get("networth") or 0)
+
+        try:
+            cases = await self._api.cases()
+            self.case_count = sum(int(c.get("amount") or 0) for c in cases)
+        except Exception as exc:
+            _log.debug("[%s] cases fetch failed: %s", self.alt_id, exc)
+
         _log.info(
-            "[%s] check: online=%s path=%s title=%r",
+            "[%s] check: online=True money=%.0f nw=%.0f cases=%d",
             self.alt_id,
-            self.online,
-            path,
-            title[:60],
+            self.money,
+            self.networth,
+            self.case_count,
         )
 
     def snapshot(self) -> Dict[str, Any]:
@@ -152,4 +151,8 @@ class AltRunner:
             "last_check": self.last_check,
             "last_error": self.last_error,
             "last_url": self.last_url,
+            "user_id": self.user_id,
+            "money": self.money,
+            "networth": self.networth,
+            "case_count": self.case_count,
         }
