@@ -1,11 +1,17 @@
-"""Playwright Chromium bootstrap — one browser, many contexts."""
+"""Playwright Chromium bootstrap.
+
+Each alt gets its own persistent Chromium profile on disk. First-run visit
+solves Cloudflare's managed challenge and the resulting cf_clearance cookie
+lands in the profile — subsequent starts are already "warm" so /api/* works
+without being challenged.
+"""
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 from typing import Optional
 
-from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
+from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 _log = logging.getLogger("agent.browser")
 
@@ -31,12 +37,10 @@ except ImportError:
         async def _apply_stealth(page: "Page") -> None:
             _log.warning("playwright-stealth not installed — skipping")
 
-# Minimal anti-fingerprint flags. Real stealth comes in phase 2; these just stop
-# the most obvious "I'm a bot" signals.
 _CHROMIUM_ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--disable-dev-shm-usage",
-    "--no-sandbox",  # needed on many VPS images
+    "--no-sandbox",
     "--disable-background-timer-throttling",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
@@ -46,37 +50,37 @@ _CHROMIUM_ARGS = [
     "--window-size=1280,800",
 ]
 
+
 class BrowserPool:
-    """Owns the single headless Chromium process and hands out contexts."""
+    """Owns the Playwright instance. Hands out one persistent context per alt."""
 
     def __init__(self, *, headless: bool, user_data_base: Path) -> None:
         self._headless = headless
         self._user_data_base = user_data_base
         self._user_data_base.mkdir(parents=True, exist_ok=True)
         self._pw: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
 
     async def start(self) -> None:
         self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(
-            headless=self._headless,
-            args=_CHROMIUM_ARGS,
-        )
-        _log.info("Chromium launched (headless=%s)", self._headless)
+        _log.info("Playwright started (headless=%s)", self._headless)
 
     async def stop(self) -> None:
-        if self._browser is not None:
-            await self._browser.close()
-            self._browser = None
         if self._pw is not None:
             await self._pw.stop()
             self._pw = None
 
     async def new_context(self, alt_id: str) -> BrowserContext:
-        assert self._browser is not None, "call start() first"
-        storage_dir = self._user_data_base / alt_id
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        ctx = await self._browser.new_context(
+        """One Chromium process + profile per alt. More memory, but each alt
+        builds its own Cloudflare trust independently and state persists across
+        restarts."""
+        assert self._pw is not None, "call start() first"
+        profile_dir = self._user_data_base / alt_id
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
+        ctx = await self._pw.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            headless=self._headless,
+            args=_CHROMIUM_ARGS,
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -87,9 +91,6 @@ class BrowserPool:
             timezone_id="Europe/Oslo",
             extra_http_headers={
                 "Accept-Language": "en-US,en;q=0.9",
-                "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-                "Sec-Ch-Ua-Mobile": "?0",
-                "Sec-Ch-Ua-Platform": '"Windows"',
             },
         )
         return ctx
