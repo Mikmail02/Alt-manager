@@ -9,6 +9,28 @@ from playwright.async_api import Browser, BrowserContext, Page, Playwright, asyn
 
 _log = logging.getLogger("agent.browser")
 
+try:
+    from playwright_stealth import Stealth  # tf-playwright-stealth ≥1.0
+    _stealth_instance = Stealth()
+
+    async def _apply_stealth(page: "Page") -> None:
+        try:
+            await _stealth_instance.apply_stealth_async(page)
+        except Exception as exc:
+            _log.warning("stealth patch failed: %s", exc)
+except ImportError:
+    try:
+        from playwright_stealth import stealth_async as _sa  # older 0.x API
+
+        async def _apply_stealth(page: "Page") -> None:
+            try:
+                await _sa(page)
+            except Exception as exc:
+                _log.warning("stealth patch failed: %s", exc)
+    except ImportError:  # pragma: no cover
+        async def _apply_stealth(page: "Page") -> None:
+            _log.warning("playwright-stealth not installed — skipping")
+
 # Minimal anti-fingerprint flags. Real stealth comes in phase 2; these just stop
 # the most obvious "I'm a bot" signals.
 _CHROMIUM_ARGS = [
@@ -24,48 +46,6 @@ _CHROMIUM_ARGS = [
     "--no-default-browser-check",
     "--window-size=1280,800",
 ]
-
-_STEALTH_INIT = """
-// Remove the automation flag.
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-// window.chrome stub — headless Chromium ships without it.
-if (!window.chrome) {
-    window.chrome = { runtime: {}, app: { isInstalled: false } };
-}
-
-// Plugins array — bot detectors check .length > 0.
-Object.defineProperty(navigator, 'plugins', {
-    get: () => [
-        { name: 'Chrome PDF Plugin' },
-        { name: 'Chrome PDF Viewer' },
-        { name: 'Native Client' },
-    ],
-});
-
-// Languages — headless reports just ['en-US'] or empty.
-Object.defineProperty(navigator, 'languages', {
-    get: () => ['en-US', 'en'],
-});
-
-// Notification.permission — headless returns 'denied' which is flagged.
-const origQuery = navigator.permissions && navigator.permissions.query;
-if (origQuery) {
-    navigator.permissions.query = (params) =>
-        params && params.name === 'notifications'
-            ? Promise.resolve({ state: Notification.permission })
-            : origQuery.call(navigator.permissions, params);
-}
-
-// WebGL vendor + renderer — headless returns SwiftShader which is a giveaway.
-const getParam = WebGLRenderingContext.prototype.getParameter;
-WebGLRenderingContext.prototype.getParameter = function(p) {
-    if (p === 37445) return 'Intel Inc.';
-    if (p === 37446) return 'Intel Iris OpenGL Engine';
-    return getParam.call(this, p);
-};
-"""
-
 
 class BrowserPool:
     """Owns the single headless Chromium process and hands out contexts."""
@@ -113,12 +93,11 @@ class BrowserPool:
                 "Sec-Ch-Ua-Platform": '"Windows"',
             },
         )
-        await ctx.add_init_script(_STEALTH_INIT)
         return ctx
 
     @staticmethod
     async def first_page(ctx: BrowserContext) -> Page:
         pages = ctx.pages
-        if pages:
-            return pages[0]
-        return await ctx.new_page()
+        page = pages[0] if pages else await ctx.new_page()
+        await _apply_stealth(page)
+        return page
