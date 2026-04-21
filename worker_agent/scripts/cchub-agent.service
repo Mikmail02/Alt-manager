@@ -10,7 +10,7 @@ User=cchub
 Group=cchub
 WorkingDirectory=/opt/cchub-agent
 Environment=AGENT_CONFIG=/opt/cchub-agent/config.toml
-ExecStart=/opt/cchub-agent/venv/bin/python -m agent
+ExecStart=/usr/bin/xvfb-run -a --server-args="-screen 0 1280x800x24 -nolisten tcp" /opt/cchub-agent/venv/bin/python -m agent
 Restart=always
 RestartSec=5
 StandardOutput=journal

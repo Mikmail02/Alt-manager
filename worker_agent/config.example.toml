@@ -19,8 +19,12 @@ token = "PASTE_TOKEN_HERE"
 heartbeat_interval_sec = 10
 
 [browser]
-# Run Chromium without a visible window. Keep true on VPS.
-headless = true
+# Run Chromium without a visible window.
+# IMPORTANT: must be false on the VPS. Case-clicker's Cloudflare blocks headless
+# Chromium on the /api/* endpoints. The systemd unit launches a virtual X display
+# via xvfb-run, so "visible" here really means "rendered into the virtual frame
+# buffer" — no one sees anything, but Cloudflare treats it as a real browser.
+headless = false
 
 # Where Playwright stores per-alt profile data (cookies, localStorage).
 # Relative paths resolve from the agent's working directory.

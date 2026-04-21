@@ -21,7 +21,9 @@ echo "==> apt: installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip git ca-certificates curl
+    python3 python3-venv python3-pip git ca-certificates curl \
+    xvfb libxcomposite1 libxdamage1 libxrandr2 libxkbcommon0 libasound2t64 \
+    libpango-1.0-0 libcairo2 libatk1.0-0 libgtk-3-0
 
 echo "==> creating service user ($SERVICE_USER)"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
