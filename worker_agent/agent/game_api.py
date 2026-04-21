@@ -50,7 +50,8 @@ class GameAPI:
         except Exception as exc:
             raise GameAPIError(f"evaluate failed for {path}: {exc}") from exc
         if not res.get("ok"):
-            raise GameAPIError(f"{res.get('status')} {path}")
+            body = (res.get("text") or "")[:200]
+            raise GameAPIError(f"{res.get('status')} {path} body={body!r}")
         return res.get("json")
 
     async def me(self) -> Dict[str, Any]:

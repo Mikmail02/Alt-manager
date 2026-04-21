@@ -47,6 +47,7 @@ class AltRunner:
         self.money: float = 0.0
         self.networth: float = 0.0
         self.case_count: int = 0
+        self._diag_dumped = False
 
     async def start(self) -> None:
         self._ctx = await self._pool.new_context(self.alt_id)
@@ -110,6 +111,7 @@ class AltRunner:
             self.online = False
             self.last_error = f"api/me: {exc}"
             _log.info("[%s] check: online=False err=%s", self.alt_id, exc)
+            await self._dump_diag_once()
             return
         except Exception as exc:
             self.online = False
@@ -142,6 +144,29 @@ class AltRunner:
             self.networth,
             self.case_count,
         )
+
+    async def _dump_diag_once(self) -> None:
+        if self._diag_dumped or self._page is None:
+            return
+        self._diag_dumped = True
+        try:
+            info = await self._page.evaluate(
+                """() => ({
+                    url: location.href,
+                    title: document.title,
+                    cookieLen: document.cookie.length,
+                    cookieKeys: document.cookie.split(';').map(s => s.trim().split('=')[0]).filter(Boolean),
+                    localStorageKeys: Object.keys(localStorage),
+                    sessionStorageKeys: Object.keys(sessionStorage),
+                    hasMetaCsrf: !!document.querySelector('meta[name*="csrf" i], meta[name*="token" i]'),
+                })"""
+            )
+            _log.warning("[%s] diag: %s", self.alt_id, info)
+            shot = f"/tmp/alt-{self.alt_id}-diag.png"
+            await self._page.screenshot(path=shot, full_page=True)
+            _log.warning("[%s] diag screenshot saved: %s", self.alt_id, shot)
+        except Exception as exc:
+            _log.warning("[%s] diag dump failed: %s", self.alt_id, exc)
 
     def snapshot(self) -> Dict[str, Any]:
         return {
