@@ -47,5 +47,8 @@ class HubClient:
             r.raise_for_status()
             return True
         except httpx.HTTPError as exc:
-            _log.warning("heartbeat failed: %s", exc)
+            _log.warning("heartbeat failed: %s: %r", type(exc).__name__, exc)
+            return False
+        except Exception as exc:
+            _log.exception("heartbeat crashed: %s: %r", type(exc).__name__, exc)
             return False
