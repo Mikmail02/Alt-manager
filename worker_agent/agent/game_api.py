@@ -1,7 +1,8 @@
 """Thin wrapper around case-clicker.com's JSON API.
 
-We use the Playwright BrowserContext's request client so cookies and
-origin headers line up with what the page itself sends.
+We call fetch() from inside the page (via page.evaluate), so every request
+inherits the exact cookies, origin, referer, and sec-fetch headers the site
+expects. This is the same trick the old Tampermonkey workers relied on.
 """
 from __future__ import annotations
 
@@ -9,11 +10,9 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from playwright.async_api import APIResponse, BrowserContext
+from playwright.async_api import Page
 
 _log = logging.getLogger("agent.api")
-
-BASE = "https://case-clicker.com"
 
 
 class GameAPIError(Exception):
@@ -21,41 +20,61 @@ class GameAPIError(Exception):
 
 
 class GameAPI:
-    def __init__(self, ctx: BrowserContext, *, alt_id: str) -> None:
-        self._ctx = ctx
+    def __init__(self, page: Page, *, alt_id: str) -> None:
+        self._page = page
         self.alt_id = alt_id
 
-    async def _json(self, resp: APIResponse) -> Any:
-        if not resp.ok:
-            raise GameAPIError(f"{resp.status} {resp.url}")
+    async def _fetch(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        body: Optional[Any] = None,
+    ) -> Any:
+        js = """
+        async ({path, method, body}) => {
+            const opts = { method, headers: {} };
+            if (body !== null) {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.body = JSON.stringify(body);
+            }
+            const r = await fetch(path, opts);
+            const text = await r.text();
+            let parsed = null;
+            try { parsed = text ? JSON.parse(text) : null; } catch(_) {}
+            return { ok: r.ok, status: r.status, text, json: parsed };
+        }
+        """
         try:
-            return await resp.json()
+            res = await self._page.evaluate(js, {"path": path, "method": method, "body": body})
         except Exception as exc:
-            raise GameAPIError(f"bad json from {resp.url}: {exc}") from exc
+            raise GameAPIError(f"evaluate failed for {path}: {exc}") from exc
+        if not res.get("ok"):
+            raise GameAPIError(f"{res.get('status')} {path}")
+        return res.get("json")
 
     async def me(self) -> Dict[str, Any]:
-        r = await self._ctx.request.get(f"{BASE}/api/me")
-        return await self._json(r)
+        data = await self._fetch("/api/me")
+        return data if isinstance(data, dict) else {}
 
     async def cases(self) -> List[Dict[str, Any]]:
-        r = await self._ctx.request.get(f"{BASE}/api/cases")
-        data = await self._json(r)
+        data = await self._fetch("/api/cases")
         return data if isinstance(data, list) else []
 
     async def all_cases(self) -> List[Dict[str, Any]]:
-        """Catalogue of every case (for price lookup)."""
-        r = await self._ctx.request.get(f"{BASE}/api/cases/cases")
-        data = await self._json(r)
+        data = await self._fetch("/api/cases/cases")
         return data if isinstance(data, list) else []
 
     async def click(self, clicks: int = 500) -> bool:
-        r = await self._ctx.request.post(
-            f"{BASE}/api/click",
-            data=json.dumps({"clicks": clicks}),
-            headers={"Content-Type": "application/json"},
-        )
-        return r.ok
+        try:
+            await self._fetch("/api/click", method="POST", body={"clicks": clicks})
+            return True
+        except GameAPIError:
+            return False
 
     async def vault(self) -> bool:
-        r = await self._ctx.request.post(f"{BASE}/api/vault")
-        return r.ok
+        try:
+            await self._fetch("/api/vault", method="POST")
+            return True
+        except GameAPIError:
+            return False

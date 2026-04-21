@@ -55,7 +55,7 @@ class AltRunner:
             await self._ctx.add_cookies(cookies)
             _log.info("[%s] loaded %d cookies", self.alt_id, len(cookies))
         self._page = await BrowserPool.first_page(self._ctx)
-        self._api = GameAPI(self._ctx, alt_id=self.alt_id)
+        self._api = GameAPI(self._page, alt_id=self.alt_id)
         self._task = asyncio.create_task(self._loop(), name=f"alt-{self.alt_id}")
 
     async def stop(self) -> None:
