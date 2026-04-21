@@ -19,7 +19,52 @@ _CHROMIUM_ARGS = [
     "--disable-background-timer-throttling",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--window-size=1280,800",
 ]
+
+_STEALTH_INIT = """
+// Remove the automation flag.
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+// window.chrome stub — headless Chromium ships without it.
+if (!window.chrome) {
+    window.chrome = { runtime: {}, app: { isInstalled: false } };
+}
+
+// Plugins array — bot detectors check .length > 0.
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [
+        { name: 'Chrome PDF Plugin' },
+        { name: 'Chrome PDF Viewer' },
+        { name: 'Native Client' },
+    ],
+});
+
+// Languages — headless reports just ['en-US'] or empty.
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['en-US', 'en'],
+});
+
+// Notification.permission — headless returns 'denied' which is flagged.
+const origQuery = navigator.permissions && navigator.permissions.query;
+if (origQuery) {
+    navigator.permissions.query = (params) =>
+        params && params.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : origQuery.call(navigator.permissions, params);
+}
+
+// WebGL vendor + renderer — headless returns SwiftShader which is a giveaway.
+const getParam = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(p) {
+    if (p === 37445) return 'Intel Inc.';
+    if (p === 37446) return 'Intel Iris OpenGL Engine';
+    return getParam.call(this, p);
+};
+"""
 
 
 class BrowserPool:
@@ -59,11 +104,16 @@ class BrowserPool:
                 "Chrome/131.0.0.0 Safari/537.36"
             ),
             viewport={"width": 1280, "height": 800},
+            locale="en-US",
+            timezone_id="Europe/Oslo",
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+                "Sec-Ch-Ua-Mobile": "?0",
+                "Sec-Ch-Ua-Platform": '"Windows"',
+            },
         )
-        # Strip the `navigator.webdriver` flag that Chromium sets in automation.
-        await ctx.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-        )
+        await ctx.add_init_script(_STEALTH_INIT)
         return ctx
 
     @staticmethod

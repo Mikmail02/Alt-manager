@@ -93,11 +93,14 @@ class AltRunner:
         assert self._page is not None
         _log.info("[%s] navigating to %s", self.alt_id, CC_URL)
         try:
-            await self._page.goto(CC_URL, wait_until="domcontentloaded", timeout=30_000)
+            await self._page.goto(CC_URL, wait_until="networkidle", timeout=45_000)
         except PWTimeout:
-            self.last_error = "nav timeout"
-            return
+            # networkidle is strict — if it times out we can still be mostly loaded.
+            self.last_error = "nav timeout (continuing)"
+            _log.warning("[%s] networkidle timeout, continuing anyway", self.alt_id)
         self.last_url = self._page.url
+        # Give Cloudflare a moment to finish any JS challenge and drop clearance.
+        await asyncio.sleep(3)
 
     async def _check_login(self) -> None:
         """Authoritative: call /api/me. If it returns user data, we're logged in."""
