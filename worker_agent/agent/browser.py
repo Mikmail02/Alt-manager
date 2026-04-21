@@ -79,6 +79,7 @@ class BrowserPool:
 
         ctx = await self._pw.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir),
+            channel="chrome",  # use system-installed Chrome, not Playwright's bundled Chromium
             headless=self._headless,
             args=_CHROMIUM_ARGS,
             user_agent=(
